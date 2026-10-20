@@ -93,6 +93,14 @@ type AgentStore = {
     clearEventLogs: () => void;
 };
 
+type InjectedAgentConfig = { url?: string; token?: string };
+
+/** 桌面外壳在页面脚本之前注入 window.__CANVAS_AGENT__，学员无需接触地址与 token。 */
+function injectedAgentConfig(): InjectedAgentConfig {
+    if (typeof window === "undefined") return {};
+    return (window as typeof window & { __CANVAS_AGENT__?: InjectedAgentConfig }).__CANVAS_AGENT__ || {};
+}
+
 export const CANVAS_AGENT_PANEL_MOTION_MS = 500;
 
 export const useAgentStore = create<AgentStore>((set, get) => ({
@@ -101,8 +109,8 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     panelMounted: true,
     panelClosing: false,
     canvasContext: null,
-    url: typeof window === "undefined" ? "http://127.0.0.1:17371" : localStorage.getItem("canvas-agent-url") || "http://127.0.0.1:17371",
-    token: typeof window === "undefined" ? "" : localStorage.getItem("canvas-agent-token") || "",
+    url: typeof window === "undefined" ? "http://127.0.0.1:17371" : injectedAgentConfig().url || localStorage.getItem("canvas-agent-url") || "http://127.0.0.1:17371",
+    token: typeof window === "undefined" ? "" : injectedAgentConfig().token || localStorage.getItem("canvas-agent-token") || "",
     connected: false,
     enabled: false,
     silentConnect: false,
