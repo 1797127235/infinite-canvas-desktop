@@ -31,6 +31,9 @@
     "yaml": "^2.9.0",
     "zod": "^3.25.0"
   },
+  "optionalDependencies": {
+    "@openai/codex-linux-x64": "npm:@openai/codex@0.146.0-linux-x64"
+  },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
