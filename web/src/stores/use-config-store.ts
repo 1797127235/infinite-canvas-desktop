@@ -4,6 +4,7 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
+import { AGNES_CHANNEL } from "@/constant/agnes-channel";
 import { desktopShellProxyUrl } from "@/constant/desktop-shell";
 
 export type ApiCallFormat = "openai" | "gemini";
@@ -82,29 +83,15 @@ export const DEFAULT_LOCAL_PROXY_URL = "http://127.0.0.1:23210";
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
-    baseUrl: OPENAI_BASE_URL,
+    baseUrl: AGNES_CHANNEL.baseUrl,
     apiKey: "",
     apiFormat: "openai",
-    channels: [
-        {
-            id: "default",
-            name: i18n.t("config.channels.defaultName"),
-            baseUrl: OPENAI_BASE_URL,
-            apiKey: "",
-            apiFormat: "openai",
-            models: [
-                { name: "gpt-image-2", capability: "image" },
-                { name: "grok-imagine-video", capability: "video" },
-                { name: "gpt-5.5", capability: "text" },
-                { name: "gpt-4o-mini-tts", capability: "audio" },
-            ],
-        },
-    ],
-    model: "default::gpt-image-2",
-    imageModel: "default::gpt-image-2",
-    videoModel: "default::grok-imagine-video",
-    textModel: "default::gpt-5.5",
-    audioModel: "default::gpt-4o-mini-tts",
+    channels: [AGNES_CHANNEL],
+    model: "agnes-cn::agnes-image-2.5-flash",
+    imageModel: "agnes-cn::agnes-image-2.5-flash",
+    videoModel: "agnes-cn::agnes-video-2.5",
+    textModel: "agnes-cn::agnes-2.5-flash",
+    audioModel: "",
     audioVoice: "alloy",
     audioFormat: "mp3",
     audioSpeed: "1",
@@ -116,7 +103,7 @@ export const defaultConfig: AiConfig = {
     videoMode: "frames",
     systemPrompt: "",
     reasoningEffort: "auto",
-    models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
+    models: ["agnes-cn::agnes-image-2.5-flash", "agnes-cn::agnes-video-2.5", "agnes-cn::agnes-video-2.5-flash", "agnes-cn::agnes-2.5-flash"],
     quality: "auto",
     size: "1:1",
     background: "",

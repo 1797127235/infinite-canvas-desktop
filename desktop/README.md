@@ -69,4 +69,5 @@ Electron 本体走 `electronDownload.mirror` 指向的 npmmirror 镜像，同样
 - 渲染进程：`contextIsolation: true`、`sandbox: true`、`nodeIntegration: false`，只通过 preload 的 `contextBridge` 暴露少量接口。
 - 本地服务只监听 `127.0.0.1`，并校验 `Host` 头，挡住 DNS rebinding。
 - 页面只允许停留在本地服务，其它链接交给系统浏览器打开。
-- 页面响应带 CSP，脚本仅允许同源。
+- 网页服务固定监听 `127.0.0.1:17370`（可用 `CANVAS_DESKTOP_WEB_PORT` 覆盖）；端口一变，按 origin 隔离的本地配置与画布数据就读不到了。
+- 页面响应带 CSP：脚本仅允许同源，并允许 `unsafe-eval`（渠道的模型调用脚本用 `new Function` 执行，禁掉等于关掉该功能）。

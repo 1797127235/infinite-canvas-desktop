@@ -7,6 +7,9 @@ const { layout } = require("./paths");
 /** Agent 反向代理挂载的前缀，避免和网页自身路由（例如 /config 设置页）冲突。 */
 const AGENT_PREFIX = "/agent-api";
 
+// 网页必须固定端口：localStorage 按 origin 隔离，端口一变用户所有渠道配置、API Key 都会读不到。
+const WEB_PORT = Number(process.env.CANVAS_DESKTOP_WEB_PORT) || 17370;
+
 const MIME_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".html": "text/html; charset=utf-8",
@@ -25,7 +28,8 @@ const MIME_TYPES = {
 /** 页面自身与 AI 接口、Agent 事件流都在本地；不放宽到任意来源，避免被外部页面复用。 */
 const CONTENT_SECURITY_POLICY = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
+    // 渠道的「模型调用脚本」由 new Function 执行（web/src/services/api/model-plugin.ts），没有 unsafe-eval 会直接被拦。
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https: http:",
     "media-src 'self' data: blob: https: http:",
@@ -108,9 +112,12 @@ function startWebServer(getAgentPort) {
         serveStatic(req, res);
     });
     return new Promise((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(0, "127.0.0.1", () => resolve(server.address().port));
+        server.once("error", (error) => {
+            if (error.code === "EADDRINUSE") return reject(new Error(`端口 ${WEB_PORT} 已被占用，无法启动桌面服务；可用环境变量 CANVAS_DESKTOP_WEB_PORT 换一个端口`));
+            reject(error);
+        });
+        server.listen(WEB_PORT, "127.0.0.1", () => resolve(server.address().port));
     });
 }
 
-module.exports = { startWebServer, AGENT_PREFIX };
+module.exports = { startWebServer, AGENT_PREFIX, WEB_PORT };
