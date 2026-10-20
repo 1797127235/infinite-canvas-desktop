@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+        <title>无限画布</title>
+        <style>
+            :root {
+                color-scheme: dark;
+            }
+            body {
+                margin: 0;
+                height: 100vh;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                gap: 18px;
+                padding: 0 40px;
+                background: #0c0a09;
+                color: #f5f5f4;
+                font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+                -webkit-app-region: drag;
+                user-select: none;
+            }
+            h1 {
+                margin: 0;
+                font-size: 17px;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+            }
+            p {
+                margin: 0;
+                font-size: 13px;
+                line-height: 1.7;
+                color: #a8a29e;
+            }
+            .bar {
+                height: 3px;
+                border-radius: 999px;
+                background: #292524;
+                overflow: hidden;
+            }
+            .bar span {
+                display: block;
+                height: 100%;
+                width: 0;
+                border-radius: 999px;
+                background: #f97316;
+                transition: width 0.3s ease;
+            }
+            .bar span.indeterminate {
+                width: 40%;
+                animation: slide 1.2s ease-in-out infinite;
+            }
+            @keyframes slide {
+                0% {
+                    transform: translateX(-100%);
+                }
+                100% {
+                    transform: translateX(250%);
+                }
+            }
+            button {
+                align-self: flex-start;
+                -webkit-app-region: no-drag;
+                display: none;
+                padding: 7px 16px;
+                border: 1px solid #44403c;
+                border-radius: 8px;
+                background: transparent;
+                color: #f5f5f4;
+                font-size: 13px;
+                cursor: pointer;
+            }
+            button:hover {
+                background: #1c1917;
+            }
+            .error button {
+                display: block;
+            }
+            .error .bar {
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>无限画布</h1>
+        <p id="status">正在准备运行环境…</p>
+        <div class="bar"><span id="progress" class="indeterminate"></span></div>
+        <button id="retry" type="button">重试</button>
+        <script>
+            const labels = {
+                codex: "正在准备 Codex 运行时…",
+                proxy: "正在启动本地网络代理…",
+                agent: "正在启动画布助手…",
+                ready: "即将进入画布…",
+            };
+            const status = document.getElementById("status");
+            const progress = document.getElementById("progress");
+            const retry = document.getElementById("retry");
+
+            window.canvasDesktop.onBootstrapProgress((value) => {
+                if (value.phase === "error") {
+                    document.body.classList.add("error");
+                    status.textContent = value.message || "启动失败，请重试。";
+                    return;
+                }
+                document.body.classList.remove("error");
+                status.textContent = labels[value.phase] || "正在准备运行环境…";
+                if (value.phase === "codex" && value.total > 0) {
+                    progress.classList.remove("indeterminate");
+                    progress.style.width = `${Math.min(100, Math.round((value.received / value.total) * 100))}%`;
+                } else if (value.phase === "ready") {
+                    progress.classList.remove("indeterminate");
+                    progress.style.width = "100%";
+                } else {
+                    progress.classList.add("indeterminate");
+                    progress.style.width = "";
+                }
+            });
+
+            retry.addEventListener("click", () => {
+                document.body.classList.remove("error");
+                status.textContent = "正在重新准备运行环境…";
+                progress.classList.add("indeterminate");
+                window.canvasDesktop.retryBootstrap();
+            });
+        </script>
+    </body>
+</html>

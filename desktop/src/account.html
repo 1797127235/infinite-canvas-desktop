@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+        <title>Codex 账号</title>
+        <style>
+            :root {
+                color-scheme: dark;
+            }
+            body {
+                margin: 0;
+                padding: 24px 28px;
+                background: #0c0a09;
+                color: #f5f5f4;
+                font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+                font-size: 13px;
+                line-height: 1.7;
+            }
+            h1 {
+                margin: 0 0 6px;
+                font-size: 15px;
+                font-weight: 600;
+            }
+            p {
+                margin: 0 0 18px;
+                color: #a8a29e;
+            }
+            label {
+                display: block;
+                margin-bottom: 6px;
+                color: #d6d3d1;
+            }
+            input {
+                box-sizing: border-box;
+                width: 100%;
+                padding: 8px 10px;
+                border: 1px solid #44403c;
+                border-radius: 8px;
+                background: #1c1917;
+                color: #f5f5f4;
+                font-size: 13px;
+            }
+            input:focus {
+                outline: none;
+                border-color: #f97316;
+            }
+            .row {
+                display: flex;
+                gap: 10px;
+                margin-top: 18px;
+            }
+            button {
+                padding: 8px 16px;
+                border: 1px solid #44403c;
+                border-radius: 8px;
+                background: transparent;
+                color: #f5f5f4;
+                font-size: 13px;
+                cursor: pointer;
+            }
+            button:hover {
+                background: #1c1917;
+            }
+            button.primary {
+                border-color: #f97316;
+                background: #f97316;
+                color: #1c1917;
+                font-weight: 600;
+            }
+            button.primary:hover {
+                background: #fb923c;
+            }
+            pre {
+                margin: 18px 0 0;
+                padding: 10px 12px;
+                max-height: 150px;
+                overflow: auto;
+                border-radius: 8px;
+                background: #1c1917;
+                color: #d6d3d1;
+                font-size: 12px;
+                white-space: pre-wrap;
+                word-break: break-all;
+            }
+            pre:empty {
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Codex 账号</h1>
+        <p>画布助手由本机 Codex 驱动。已登录过 Codex 的电脑会自动复用账号，这里只在需要时补登。</p>
+        <label for="key">API Key</label>
+        <input id="key" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+        <div class="row">
+            <button id="save" class="primary" type="button">用 API Key 登录</button>
+            <button id="browser" type="button">浏览器登录</button>
+            <button id="status" type="button">查看状态</button>
+        </div>
+        <pre id="output"></pre>
+        <script>
+            const output = document.getElementById("output");
+            const key = document.getElementById("key");
+            const busy = (value) => document.querySelectorAll("button").forEach((button) => (button.disabled = value));
+            const show = (result) => (output.textContent = String(result?.text || "").trim() || (result?.ok ? "操作完成。" : "操作失败。"));
+
+            document.getElementById("save").addEventListener("click", async () => {
+                busy(true);
+                output.textContent = "正在登录…";
+                try {
+                    show(await window.canvasDesktop.codexLoginApiKey(key.value));
+                    key.value = "";
+                } finally {
+                    busy(false);
+                }
+            });
+
+            document.getElementById("browser").addEventListener("click", async () => {
+                busy(true);
+                output.textContent = "正在打开登录页面…";
+                try {
+                    show(await window.canvasDesktop.codexLoginBrowser());
+                } finally {
+                    busy(false);
+                }
+            });
+
+            document.getElementById("status").addEventListener("click", async () => {
+                busy(true);
+                try {
+                    show(await window.canvasDesktop.codexStatus());
+                } finally {
+                    busy(false);
+                }
+            });
+
+            window.canvasDesktop.codexStatus().then(show);
+        </script>
+    </body>
+</html>

@@ -67,8 +67,12 @@ export class CodexAppClient {
 
     /** 启动并初始化 Codex app-server。 */
     static async start(emit: AgentEmit, onExit: () => void) {
-        logger.info("Starting Codex app-server", { executable: process.execPath, codex: codexBin() });
-        const child = spawn(process.execPath, [codexBin(), "app-server", "--stdio"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+        // The desktop shell ships its own Codex runtime and points here, so a local npm install is never required.
+        const externalBin = process.env.CANVAS_CODEX_BIN?.trim() || "";
+        logger.info("Starting Codex app-server", { executable: process.execPath, codex: externalBin || codexBin() });
+        const child = externalBin
+            ? spawn(externalBin, ["app-server", "--stdio"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true })
+            : spawn(process.execPath, [codexBin(), "app-server", "--stdio"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
         const client = new CodexAppClient(child, emit);
         let stopped = false;
         const stop = () => {
@@ -784,12 +788,15 @@ function canvasAgentMcpCommand() {
     const current = process.argv.find((arg) => /index\.(t|j)s$/.test(arg)) || "";
     const entry = path.resolve(current || fileURLToPath(new URL("../index.js", import.meta.url)));
     const tsx = path.join(path.dirname(entry), "..", "node_modules", "tsx", "dist", "cli.mjs");
-    return entry.endsWith(".ts") ? { command: process.execPath, args: [tsx, entry, "mcp"] } : { command: process.execPath, args: [entry, "mcp"] };
+    // 桌面版由 Electron 内嵌 Node 运行，process.execPath 是 Electron；MCP 子进程必须显式带上
+    // ELECTRON_RUN_AS_NODE 才能当 Node 用，Codex 拉起 MCP 时不会继承这个变量。
+    const env = process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : undefined;
+    return entry.endsWith(".ts") ? { command: process.execPath, args: [tsx, entry, "mcp"], env } : { command: process.execPath, args: [entry, "mcp"], env };
 }
 
 /** 生成 Codex app-server 使用的 MCP 配置。 */
 function codexConfig(permissionMode: AgentPermissionMode) {
-    return { model_reasoning_summary: "auto", ...(permissionMode === "automatic" ? { approvals_reviewer: "auto_review" } : {}), mcp_servers: { "infinite-canvas": { command: canvasAgentMcp.command, args: canvasAgentMcp.args, default_tools_approval_mode: "approve", startup_timeout_sec: 20, tool_timeout_sec: 90 } } };
+    return { model_reasoning_summary: "auto", ...(permissionMode === "automatic" ? { approvals_reviewer: "auto_review" } : {}), mcp_servers: { "infinite-canvas": { command: canvasAgentMcp.command, args: canvasAgentMcp.args, env: canvasAgentMcp.env, default_tools_approval_mode: "approve", startup_timeout_sec: 20, tool_timeout_sec: 90 } } };
 }
 
 function threadSettings(permissionMode: AgentPermissionMode) {

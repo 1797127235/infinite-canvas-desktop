@@ -8,6 +8,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { videoResolutionOptions } from "@/components/video-settings-panel";
 import { ChannelEditorDrawer } from "@/components/layout/channel-editor-drawer";
 import { ConfigLocalProxy } from "@/components/layout/config-local-proxy";
+import { isDesktopShell } from "@/constant/desktop-shell";
 import { ConfigPromptSources } from "@/components/layout/config-prompt-sources";
 import { ConfigLocalStorage } from "@/components/layout/config-local-storage";
 import type { AppLocale } from "@/i18n";
@@ -16,7 +17,18 @@ import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent }
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
 import { computeMediaSize, inferMediaRatio, inferMediaScale, mediaScaleOptions, parseVideoResolution } from "@/lib/media-size";
-import { createModelChannel, modelOptionsFromChannels, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore, type AiConfig, type ApiCallFormat, type ConfigTabKey, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import {
+    createModelChannel,
+    modelOptionsFromChannels,
+    normalizeModelOptionValue,
+    selectableModelsByCapability,
+    useConfigStore,
+    type AiConfig,
+    type ApiCallFormat,
+    type ConfigTabKey,
+    type ModelCapability,
+    type ModelChannel,
+} from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -229,11 +241,8 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                             </div>
                         ),
                     },
-                    {
-                        key: "local-proxy",
-                        label: t("config.tabs.localProxy"),
-                        children: <ConfigLocalProxy />,
-                    },
+                    // 桌面版已内置本地代理，这一页只对网页版开放。
+                    ...(isDesktopShell ? [] : [{ key: "local-proxy", label: t("config.tabs.localProxy"), children: <ConfigLocalProxy /> }]),
                     {
                         key: "preferences",
                         label: t("config.tabs.preferences"),

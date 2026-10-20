@@ -1,0 +1,60 @@
+appId: ai.infinitecanvas.desktop
+productName: Infinite Canvas
+copyright: MIT
+
+directories:
+    output: release
+
+files:
+    - src/**
+    - package.json
+    - node_modules/**
+
+# 桌面壳内置网页产物、Canvas Agent、本地代理；Codex 运行时按平台在首次启动时下载，
+# 所以安装包里故意排除体积最大的 @openai/codex-<platform> 二进制包。
+extraResources:
+    - from: ../web/dist
+      to: web
+    - from: ../canvas-agent/dist
+      to: canvas-agent/dist
+    - from: ../canvas-agent/package.json
+      to: canvas-agent/package.json
+    # lockfile 提供 Codex 平台包的官方 integrity，运行时用它校验镜像下载的文件。
+    - from: ../canvas-agent/package-lock.json
+      to: canvas-agent/package-lock.json
+    - from: ../canvas-agent/agent-instructions.md
+      to: canvas-agent/agent-instructions.md
+    - from: ../canvas-agent/node_modules
+      to: canvas-agent/node_modules
+      filter:
+          - "**/*"
+          - "!**/@openai/codex-*/**"
+    - from: ../canvas-proxy/index.js
+      to: canvas-proxy/index.js
+    - from: ../canvas-proxy/package.json
+      to: canvas-proxy/package.json
+
+win:
+    target:
+        - target: nsis
+          arch:
+              - x64
+    artifactName: ${productName}-${version}-win-${arch}.${ext}
+
+nsis:
+    oneClick: false
+    perMachine: false
+    allowToChangeInstallationDirectory: true
+    createDesktopShortcut: true
+    shortcutName: Infinite Canvas
+
+linux:
+    target:
+        - AppImage
+        - deb
+    category: Graphics
+    maintainer: infinite-canvas
+    artifactName: ${productName}-${version}-linux-${arch}.${ext}
+
+electronDownload:
+    mirror: https://npmmirror.com/mirrors/electron/

@@ -1,0 +1,23 @@
+{
+    "name": "infinite-canvas-desktop",
+    "productName": "Infinite Canvas",
+    "version": "0.20.0",
+    "private": true,
+    "description": "无限画布桌面版：内置 Canvas Agent 与本地代理，用户无需安装任何依赖",
+    "main": "src/main.js",
+    "license": "MIT",
+    "scripts": {
+        "start": "electron .",
+        "resources": "npm --prefix ../canvas-agent install --no-audit --no-fund && npm --prefix ../canvas-agent run build && npm --prefix ../canvas-agent install --omit=dev --no-audit --no-fund && npm --prefix ../web install --no-audit --no-fund && npm --prefix ../web run build",
+        "dist": "electron-builder --win --linux",
+        "dist:win": "electron-builder --win",
+        "dist:linux": "electron-builder --linux"
+    },
+    "dependencies": {
+        "tar": "^7.5.22"
+    },
+    "devDependencies": {
+        "electron": "^44.9.2",
+        "electron-builder": "^26.15.3"
+    }
+}

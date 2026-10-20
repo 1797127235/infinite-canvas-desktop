@@ -31,12 +31,7 @@ export default function PromptsPage() {
     const { data: templates = [] } = useQuery({ queryKey: ["workflow-templates"], queryFn: fetchWorkflowTemplates });
     const templateTags = useMemo(() => [...new Set(templates.flatMap((item) => item.tags))], [templates]);
     const visibleTemplates = useMemo(
-        () =>
-            templates.filter(
-                (item) =>
-                    (!titleKeyword || item.title.includes(titleKeyword) || item.description.includes(titleKeyword)) &&
-                    (selectedTags.length === 0 || selectedTags.every((tag) => item.tags.includes(tag))),
-            ),
+        () => templates.filter((item) => (!titleKeyword || item.title.includes(titleKeyword) || item.description.includes(titleKeyword)) && (selectedTags.length === 0 || selectedTags.every((tag) => item.tags.includes(tag)))),
         [templates, titleKeyword, selectedTags],
     );
     const visibleTotal = showTemplates ? visibleTemplates.length : totalPrompts;
@@ -63,7 +58,10 @@ export default function PromptsPage() {
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background text-stone-800 dark:text-stone-100">
-            <main className="min-h-0 flex-1 overflow-y-auto bg-background bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] px-4 py-6 [background-size:16px_16px] sm:px-6 lg:py-8 dark:bg-[radial-gradient(rgba(245,245,244,.16)_1px,transparent_1px)]" onScroll={handleListScroll}>
+            <main
+                className="min-h-0 flex-1 overflow-y-auto bg-background bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] px-4 py-6 [background-size:16px_16px] sm:px-6 lg:py-8 dark:bg-[radial-gradient(rgba(245,245,244,.16)_1px,transparent_1px)]"
+                onScroll={handleListScroll}
+            >
                 <div className="mx-auto max-w-7xl">
                     <div className="text-center">
                         <h1 className="text-2xl font-semibold text-stone-950 dark:text-stone-100">{t("prompts.title")}</h1>
@@ -102,7 +100,11 @@ export default function PromptsPage() {
                         </aside>
                         <section className="min-w-0">
                             <Input size="large" prefix={<Search className="size-4 text-stone-400" />} value={titleKeyword} placeholder={t("prompts.search")} onChange={(event) => setTitleKeyword(event.target.value)} />
-                            {query.isLoading && !showTemplates ? <div className="flex h-60 items-center justify-center"><Spin /></div> : null}
+                            {query.isLoading && !showTemplates ? (
+                                <div className="flex h-60 items-center justify-center">
+                                    <Spin />
+                                </div>
+                            ) : null}
                             {!query.isLoading || showTemplates ? (
                                 <div className="mt-5">
                                     {showTemplates ? (
@@ -116,11 +118,25 @@ export default function PromptsPage() {
                                             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("prompts.templateEmpty")} className="py-16" />
                                         )
                                     ) : (
-                                        <PromptGrid items={promptItems} onOpen={setSelectedPrompt} renderActions={(item) => <Button type="text" size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => savePromptAsset(item)}>{t("common.addToAssets")}</Button>} onCopy={(item) => copyText(item.prompt, t("common.promptCopied"))} emptyText={t("prompts.empty")} />
+                                        <PromptGrid
+                                            items={promptItems}
+                                            onOpen={setSelectedPrompt}
+                                            renderActions={(item) => (
+                                                <Button type="text" size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => savePromptAsset(item)}>
+                                                    {t("common.addToAssets")}
+                                                </Button>
+                                            )}
+                                            onCopy={(item) => copyText(item.prompt, t("common.promptCopied"))}
+                                            emptyText={t("prompts.empty")}
+                                        />
                                     )}
                                 </div>
                             ) : null}
-                            {!showTemplates ? <div className="mt-6 text-center text-xs text-stone-500 dark:text-stone-400">{query.isFetchingNextPage ? t("prompts.loading") : query.hasNextPage ? t("prompts.loadMore") : promptItems.length > 0 ? t("prompts.end") : null}</div> : null}
+                            {!showTemplates ? (
+                                <div className="mt-6 text-center text-xs text-stone-500 dark:text-stone-400">
+                                    {query.isFetchingNextPage ? t("prompts.loading") : query.hasNextPage ? t("prompts.loadMore") : promptItems.length > 0 ? t("prompts.end") : null}
+                                </div>
+                            ) : null}
                         </section>
                     </div>
                 </div>
@@ -149,5 +165,14 @@ function PromptFilter({ label, options, selected, onChange, renderOption }: { la
 }
 
 function PromptGrid({ items, onOpen, onCopy, renderActions, emptyText }: { items: Prompt[]; onOpen: (item: Prompt) => void; onCopy: (item: Prompt) => void; renderActions: (item: Prompt) => ReactNode; emptyText: string }) {
-    return <div><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{items.map((item) => <PromptCard key={`${item.sourceId}:${item.id}`} item={item} onOpen={() => onOpen(item)} onCopy={() => onCopy(item)} extraAction={renderActions(item)} />)}</div>{items.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText} className="py-16" /> : null}</div>;
+    return (
+        <div>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {items.map((item) => (
+                    <PromptCard key={`${item.sourceId}:${item.id}`} item={item} onOpen={() => onOpen(item)} onCopy={() => onCopy(item)} extraAction={renderActions(item)} />
+                ))}
+            </div>
+            {items.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText} className="py-16" /> : null}
+        </div>
+    );
 }

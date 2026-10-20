@@ -145,7 +145,9 @@ function renderConfigContent(node: CanvasNodeData) {
 function TemplateConfigContent({ node }: { node: CanvasNodeData }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const meta = node.metadata || {};
-    const model = String(meta.model || "").split("::").pop();
+    const model = String(meta.model || "")
+        .split("::")
+        .pop();
     const params = [meta.size, meta.quality, meta.seconds ? `${meta.seconds}s` : "", meta.vquality ? `${meta.vquality}p` : ""].filter(Boolean);
     return (
         <div className="flex h-full w-full flex-col gap-2 overflow-hidden p-4 text-left">

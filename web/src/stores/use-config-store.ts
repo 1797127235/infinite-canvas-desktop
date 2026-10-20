@@ -4,6 +4,7 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
+import { desktopShellProxyUrl } from "@/constant/desktop-shell";
 
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -121,8 +122,8 @@ export const defaultConfig: AiConfig = {
     background: "",
     count: "1",
     canvasImageCount: "3",
-    proxyEnabled: false,
-    proxyUrl: DEFAULT_LOCAL_PROXY_URL,
+    proxyEnabled: Boolean(desktopShellProxyUrl),
+    proxyUrl: desktopShellProxyUrl || DEFAULT_LOCAL_PROXY_URL,
     nodeRegenerateBehavior: "new-node",
     autoFocusOnSelect: false,
 };
@@ -280,8 +281,8 @@ export const useConfigStore = create<ConfigStore>()(
                         videoWatermark: config.videoWatermark || "false",
                         videoMode: config.videoMode === "reference" ? "reference" : "frames",
                         canvasImageCount: config.canvasImageCount || "3",
-                        proxyEnabled: Boolean(config.proxyEnabled),
-                        proxyUrl: config.proxyUrl || DEFAULT_LOCAL_PROXY_URL,
+                        proxyEnabled: Boolean(desktopShellProxyUrl) || Boolean(config.proxyEnabled),
+                        proxyUrl: desktopShellProxyUrl || config.proxyUrl || DEFAULT_LOCAL_PROXY_URL,
                         nodeRegenerateBehavior: config.nodeRegenerateBehavior === "overwrite" ? "overwrite" : "new-node",
                         autoFocusOnSelect: Boolean(config.autoFocusOnSelect),
                     },
@@ -323,10 +324,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
     };
 }
 
-export function upsertChannelCredentials(
-    config: AiConfig,
-    input: { baseUrl?: string | null; apiKey?: string | null },
-): ChannelCredentialsImportResult & { config: AiConfig } {
+export function upsertChannelCredentials(config: AiConfig, input: { baseUrl?: string | null; apiKey?: string | null }): ChannelCredentialsImportResult & { config: AiConfig } {
     const rawBaseUrl = input.baseUrl?.trim() || "";
     if (!rawBaseUrl) return { status: "missing-base-url", config };
     if (!isHttpBaseUrl(rawBaseUrl)) return { status: "invalid-base-url", config };
@@ -440,7 +438,18 @@ export function resolveModelChannel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     const model = decoded?.model || value;
     const matched = decoded ? config.channels.find((channel) => channel.id === decoded.channelId) : config.channels.find((channel) => channel.models.some((item) => item.name === model));
-    return matched || config.channels[0] || createModelChannel({ id: "default", name: i18n.t("config.channels.defaultName"), baseUrl: config.baseUrl, apiKey: config.apiKey, apiFormat: config.apiFormat, models: config.models.map(modelOptionName).map((name) => ({ name, capability: guessCapability(name) })) });
+    return (
+        matched ||
+        config.channels[0] ||
+        createModelChannel({
+            id: "default",
+            name: i18n.t("config.channels.defaultName"),
+            baseUrl: config.baseUrl,
+            apiKey: config.apiKey,
+            apiFormat: config.apiFormat,
+            models: config.models.map(modelOptionName).map((name) => ({ name, capability: guessCapability(name) })),
+        })
+    );
 }
 
 export function resolveModelRequestConfig(config: AiConfig, value: string) {
