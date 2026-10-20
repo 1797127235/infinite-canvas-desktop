@@ -364,7 +364,7 @@ function isHttpBaseUrl(baseUrl: string) {
     }
 }
 
-function normalizedBaseUrlKey(baseUrl: string) {
+export function normalizedBaseUrlKey(baseUrl: string) {
     try {
         return stripTrailingApiVersion(normalizeImportedBaseUrl(baseUrl));
     } catch {

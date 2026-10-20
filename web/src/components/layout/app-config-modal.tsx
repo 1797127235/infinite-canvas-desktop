@@ -50,7 +50,7 @@ function createWebdavDomainProgress(): Record<AppSyncDomainKey, WebdavDomainProg
 }
 
 export function AppConfigPanel({ showDoneButton = false, initialTab = "channels" }: { showDoneButton?: boolean; initialTab?: ConfigTabKey }) {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const { i18n, t } = useTranslation();
     const configInputRef = useRef<HTMLInputElement>(null);
     const [activeTab, setActiveTab] = useState<ConfigTabKey>(initialTab);
@@ -85,9 +85,23 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     };
 
     const loadConfigFile = async (file: File) => {
+        const confirmed = await new Promise<boolean>((resolve) => {
+            modal.confirm({
+                title: t("config.importConfirmTitle"),
+                content: t("config.importConfirmContent", { channels: config.channels.length }),
+                okText: t("config.importConfirmOk"),
+                cancelText: t("common.cancel"),
+                onOk: () => resolve(true),
+                onCancel: () => resolve(false),
+            });
+        });
+        if (!confirmed) return;
         try {
-            await importAppConfig(file);
+            const result = await importAppConfig(file);
             message.success(t("config.imported"));
+            if (result.keptKeys || result.keptWebdavPassword) {
+                message.info(t("config.importKeptCredentials", { count: result.keptKeys }));
+            }
         } catch (error) {
             message.error(error instanceof Error ? error.message : t("config.importFailed"));
         } finally {
