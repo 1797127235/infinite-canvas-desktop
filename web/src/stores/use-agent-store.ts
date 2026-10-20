@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import i18n from "@/i18n";
+import { discoverAgentConfig } from "@/services/api/canvas-agent";
 
 import type { CanvasAgentOp, CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
@@ -85,7 +86,7 @@ type AgentStore = {
     closePanel: () => void;
     togglePanel: () => void;
     setCanvasContext: (context: AgentCanvasContext | null) => void;
-    connectAgent: (options?: { silent?: boolean }) => void;
+    connectAgent: (options?: { silent?: boolean }) => Promise<void>;
     disconnectAgent: (patch?: Partial<Omit<AgentStore, "setAgentState" | "connectAgent" | "disconnectAgent" | "addMessage" | "addEventLog" | "clearEventLogs" | "openPanel" | "closePanel" | "togglePanel" | "setCanvasContext">>) => void;
     addMessage: (item: AgentChatItem) => void;
     addEventLog: (item: AgentEventLog) => void;
@@ -143,10 +144,15 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     },
     togglePanel: () => (get().panelOpen ? get().closePanel() : get().openPanel()),
     setCanvasContext: (canvasContext) => set({ canvasContext }),
-    connectAgent: (options) => {
+    connectAgent: async (options) => {
         const silent = options?.silent ?? false;
-        const endpoint = get().url.trim().replace(/\/$/, "");
-        const token = get().token.trim();
+        let endpoint = get().url.trim().replace(/\/$/, "");
+        let token = get().token.trim();
+        if (!token) {
+            const discovered = await discoverAgentConfig(endpoint);
+            endpoint = (discovered?.url || endpoint).trim().replace(/\/$/, "");
+            token = (discovered?.token || "").trim();
+        }
         if (!endpoint || !token) return set({ connectError: silent ? "" : i18n.t("agent.state.connectionRequired") });
         try {
             const parsed = new URL(endpoint);

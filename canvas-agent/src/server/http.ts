@@ -130,7 +130,7 @@ export function startHttpServer() {
         next();
     });
     app.get("/health", (_req, res) => res.json(session.health()));
-    app.get("/config", (_req, res) => res.json({ ok: true, protocolVersion: AGENT_PROTOCOL_VERSION, url: config.url, hasToken: true }));
+    app.get("/config", (req, res) => res.json({ ok: true, protocolVersion: AGENT_PROTOCOL_VERSION, url: config.url, hasToken: true, ...(isLocalPageOrigin(req) ? { token: config.token } : {}) }));
     app.use((req, res, next) => {
         if (validToken(req, requestUrl(req, config), config.token)) return next();
         res.status(401).json({ ok: false, error: "invalid token" });
@@ -525,6 +525,19 @@ function revealLocalFile(filePath: string, isDirectory: boolean) {
 /** 结合服务配置解析当前请求 URL。 */
 function requestUrl(req: Request, config: CanvasAgentConfig) {
     return new URL(req.originalUrl || req.url || "/", config.url);
+}
+
+/** 判断请求是否来自本机页面；token 只下发给本机页面，远程站点读不到。 */
+function isLocalPageOrigin(req: Request) {
+    const origin = req.headers.origin;
+    if (typeof origin !== "string" || !origin) return false;
+    try {
+        const url = new URL(origin);
+        if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+        return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1" || url.hostname === "[::1]";
+    } catch {
+        return false;
+    }
 }
 
 /** 设置跨域响应头并记录通过 token 授权的来源。 */
