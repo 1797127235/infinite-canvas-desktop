@@ -373,9 +373,13 @@ export function normalizedBaseUrlKey(baseUrl: string) {
 }
 
 function normalizeImportedBaseUrl(baseUrl: string) {
-    const url = new URL(baseUrl.trim());
-    url.hash = "";
-    return url.toString().replace(/\/+$/, "");
+    try {
+        const url = new URL(baseUrl.trim());
+        url.hash = "";
+        return url.toString().replace(/\/+$/, "");
+    } catch {
+        return baseUrl.trim().replace(/\/+$/, "");
+    }
 }
 
 function stripTrailingApiVersion(baseUrl: string) {
@@ -383,8 +387,12 @@ function stripTrailingApiVersion(baseUrl: string) {
 }
 
 function importedChannelName(baseUrl: string) {
-    const hostname = new URL(baseUrl).hostname;
-    return hostname.replace(/^(?:www|api)\./i, "") || i18n.t("config.channels.newName");
+    try {
+        const hostname = new URL(baseUrl).hostname;
+        return hostname.replace(/^(?:www|api)\./i, "") || i18n.t("config.channels.newName");
+    } catch {
+        return i18n.t("config.channels.newName");
+    }
 }
 
 export function encodeChannelModel(channelId: string, model: string) {
