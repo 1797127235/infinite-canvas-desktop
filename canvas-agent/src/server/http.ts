@@ -14,10 +14,19 @@ import { logger } from "../utils/logger.js";
 import { checkVersions } from "../version-check.js";
 import { SkillStore, SkillStoreError } from "../skills/store.js";
 
+/** 读取配置里的端口；URL 损坏时回退，避免启动直接抛错。 */
+function configPort(url: string) {
+    try {
+        return Number(new URL(url).port) || 0;
+    } catch {
+        return 0;
+    }
+}
+
 /** 启动仅监听本机的 Canvas Agent HTTP 服务。 */
 export function startHttpServer() {
     const config = loadConfig(true);
-    const port = Number(process.env.PORT) || Number(new URL(config.url).port) || DEFAULT_PORT;
+    const port = Number(process.env.PORT) || configPort(config.url) || DEFAULT_PORT;
     config.url = `http://127.0.0.1:${port}`;
     saveConfig(config);
 

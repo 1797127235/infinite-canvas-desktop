@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "npm --prefix canvas-agent install && npm --prefix web install && npm --prefix web run build",
+    "build": "npm --prefix canvas-agent install && cd web && bun install && bun run build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
