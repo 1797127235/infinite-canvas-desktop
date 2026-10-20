@@ -109,7 +109,7 @@ export function AgentChatComposer({
 
 function AgentModelControls({ models, model, reasoningEffort, onModelChange, onReasoningEffortChange }: { models: AgentModel[]; model: string; reasoningEffort: AgentReasoningEffort; onModelChange: (model: string) => void; onReasoningEffortChange: (effort: AgentReasoningEffort) => void }) {
     const { t } = useTranslation();
-    const current = models.find((item) => item.model === model) || models[0];
+    const current = models.find((item) => item.model === model) || models.find((item) => item.isDefault) || models[0];
     const effortLabel = (effort: AgentReasoningEffort) => t(`agent.composer.effort.${effort}`);
     const [modelOpen, setModelOpen] = useState(false);
     const [reasoningOpen, setReasoningOpen] = useState(false);
@@ -117,7 +117,7 @@ function AgentModelControls({ models, model, reasoningEffort, onModelChange, onR
         <div className="flex min-w-0 items-center gap-1">
             <Tooltip title={t("agent.composer.model", { model: current.displayName || current.model })} placement="top" open={modelOpen ? false : undefined}>
                 <span className="inline-flex shrink-0">
-                    <Select value={model} open={modelOpen} onOpenChange={setModelOpen} onValueChange={onModelChange}>
+                    <Select value={current.model} open={modelOpen} onOpenChange={setModelOpen} onValueChange={onModelChange}>
                         <SelectTrigger hideChevron className="h-9 w-9 min-w-9 justify-center gap-0 rounded-full border-0 bg-transparent px-0 text-xs font-medium shadow-none hover:bg-black/5 focus:ring-0 @min-[660px]:w-auto @min-[660px]:min-w-36 @min-[660px]:max-w-36 @min-[660px]:justify-start @min-[660px]:gap-1.5 @min-[660px]:px-2.5 dark:bg-transparent dark:hover:bg-white/10" aria-label={t("agent.composer.selectModel", { model: current.displayName || current.model })}>
                             <Cpu className="size-3.5 shrink-0 opacity-70" />
                             <span className="hidden min-w-0 flex-1 truncate text-left @min-[660px]:inline">{current.displayName || current.model}</span>

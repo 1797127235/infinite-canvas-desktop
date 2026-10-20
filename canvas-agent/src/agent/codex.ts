@@ -117,9 +117,75 @@ export async function listCodexThreads(emit: AgentEmit, options: { cwd: string; 
     return { data, nextCursor: field(result, "nextCursor") || null, backwardsCursor: field(result, "backwardsCursor") || null };
 }
 
-/** 查询当前账号可用于新任务的 Codex 模型。 */
+/**
+ * 内置 provider 由 Codex 自带模型清单维护，不需要外部查询。
+ * 自定义 provider（中转）的模型不在 Codex 内置清单里，必须从它的 /models 读取，否则前端只能看到 gpt-5.x。
+ */
+const BUILTIN_PROVIDER_IDS = new Set(["openai", "ollama", "lmstudio"]);
+const PROVIDER_REASONING_EFFORTS: CodexReasoningEffort[] = ["low", "medium", "high"];
+
+/** 读取 Codex 保存的 API Key；自定义 provider 未声明 env_key 时使用。 */
+async function readCodexApiKey() {
+    const codexHome = process.env.CODEX_HOME?.trim() || path.join(os.homedir(), ".codex");
+    try {
+        const raw = await fs.readFile(path.join(codexHome, "auth.json"), "utf8");
+        const parsed = JSON.parse(raw) as JsonRecord;
+        return String(field(parsed, "OPENAI_API_KEY") || "").trim();
+    } catch {
+        return "";
+    }
+}
+
+/** 从自定义 provider 的 /models 端点读取真实可用模型；不是自定义 provider 时返回 null。 */
+async function listProviderModels(emit: AgentEmit) {
+    const app = await getCodexApp(emit);
+    const { config } = await app.readConfig();
+    const providerId = String(field(config, "model_provider") || "").trim();
+    if (!providerId || BUILTIN_PROVIDER_IDS.has(providerId)) return null;
+    const providers = field(config, "model_providers");
+    const provider = providers && typeof providers === "object" ? (providers as JsonRecord)[providerId] : undefined;
+    if (!provider || typeof provider !== "object") return null;
+    const baseUrl = String(field(provider as JsonRecord, "base_url") || "").trim();
+    if (!baseUrl) return null;
+    const envKey = String(field(provider as JsonRecord, "env_key") || "").trim();
+    const apiKey = (envKey ? process.env[envKey] : "") || (await readCodexApiKey());
+    const headers: Record<string, string> = { accept: "application/json" };
+    if (apiKey) headers.authorization = `Bearer ${apiKey}`;
+    const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, { headers, signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`provider /models 返回 HTTP ${response.status}`);
+    const payload = (await response.json()) as JsonRecord;
+    const entries = field(payload, "data");
+    if (!Array.isArray(entries)) return null;
+    const configuredModel = String(field(config, "model") || "").trim();
+    const seen = new Set<string>();
+    const models = entries.flatMap<JsonRecord>((entry) => {
+        const id = typeof entry === "object" && entry ? String(field(entry as JsonRecord, "id") || "").trim() : "";
+        if (!id || seen.has(id)) return [];
+        seen.add(id);
+        return [
+            {
+                id,
+                model: id,
+                displayName: id,
+                defaultReasoningEffort: "medium" as CodexReasoningEffort,
+                supportedReasoningEfforts: PROVIDER_REASONING_EFFORTS.map((reasoningEffort) => ({ reasoningEffort })),
+                isDefault: id === configuredModel,
+            },
+        ];
+    });
+    return models.length ? models : null;
+}
+
+/** 查询可用于新任务的模型：自定义 provider 优先用它的真实清单，否则回退到 Codex 内置清单。 */
 export async function listCodexModels(emit: AgentEmit) {
-    return await (await getCodexApp(emit)).listModels();
+    const app = await getCodexApp(emit);
+    try {
+        const providerModels = await listProviderModels(emit);
+        if (providerModels) return { data: providerModels, nextCursor: null };
+    } catch (error) {
+        logger.warn("Failed to list provider models, falling back to Codex model list", { error: errorMessage(error) });
+    }
+    return await app.listModels();
 }
 
 /** 查询当前工作空间的原生 Skill 列表。 */

@@ -185,6 +185,11 @@ export class CodexAppClient {
         return this.request("model/list", { limit: 100, includeHidden: false });
     }
 
+    /** 读取 app-server 当前生效的配置；用于发现自定义 provider 的 base_url。 */
+    readConfig() {
+        return this.request("config/read", {});
+    }
+
     /** 查询指定工作空间可发现的 Codex Skills。 */
     listSkills(cwd: string, forceReload = false) {
         if (!forceReload) return this.request("skills/list", { cwds: [cwd] });

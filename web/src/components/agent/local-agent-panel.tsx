@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { App, Button, Tooltip } from "antd";
 import dayjs from "dayjs";
-import { Bot, History, MessageSquare, PanelRightClose, PlugZap, Plus, Sparkles, Terminal } from "lucide-react";
+import { Bot, History, MessageSquare, PanelRightClose, Plus, Sparkles, Terminal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
@@ -24,7 +24,6 @@ import { isSiteTool, runSiteTool } from "@/lib/agent/agent-site-tools";
 import { acknowledgeCodexHistory, activateAgentClient, AgentApiError, discoverAgentConfig, fetchAgentJson, interruptCodexTurn, postCodexApproval, postState, postToolResult } from "@/services/api/canvas-agent";
 import { AgentChatTimeline, AgentTaskProgress, AgentUsageBar } from "./agent-chat";
 import { AgentChatComposer } from "./agent-chat-composer";
-import { AgentConnectView } from "./agent-connect-view";
 import {
     activityDeltaFallback,
     activityDetail,
@@ -134,7 +133,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     // canvasContext is intentionally excluded because project updates it every frame during dragging and resizing.
     // The panel uses it only for ref synchronization and debounced postState calls, never during rendering.
     // Subscribing here would rerender the panel every frame and amplify the #185 crash, so it is observed imperatively below.
-    const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, tokenUsage, eventLogs, threads, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, permissionMode, models, model, reasoningEffort, activity, conversation, connectError, pendingTool, pendingApprovals } = useAgentStore(
+    const { url, token, connected, enabled, prompt, attachments, sending, waiting, tokenUsage, eventLogs, threads, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, permissionMode, models, model, reasoningEffort, activity, conversation, pendingTool, pendingApprovals } = useAgentStore(
         useShallow((state) => ({
             width: state.width,
             url: state.url,
@@ -606,7 +605,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             const savedEffort = useAgentStore.getState().reasoningEffort;
             const efforts = current.supportedReasoningEfforts.map((item) => item.reasoningEffort);
             const nextEffort = efforts.includes(savedEffort as AgentReasoningEffort) ? savedEffort as AgentReasoningEffort : current.defaultReasoningEffort || efforts[0];
-            localStorage.setItem("canvas-agent-model", current.model);
+            localStorage.setItem("canvas-agent-model-choice", current.model);
             localStorage.setItem("canvas-agent-reasoning-effort", nextEffort);
             setAgentState({ models, model: current.model, reasoningEffort: nextEffort });
         }).catch((error) => addEventLog(rt("modelListFailed"), error));
@@ -942,7 +941,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             return;
         }
         errorLoggedRef.current = false;
-        setAgentState({ url: nextEndpoint, token: nextToken, enabled: true, connected: false, silentConnect: silent, fragmentBootstrap: false, activity: rt("connecting"), connectError: "", activeTab: "setup" });
+        setAgentState({ url: nextEndpoint, token: nextToken, enabled: true, connected: false, silentConnect: silent, fragmentBootstrap: false, activity: rt("connecting"), connectError: "", activeTab: "chat" });
     };
 
     useLayoutEffect(() => {
@@ -950,7 +949,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         if (!bootstrap) return;
         navigate(`${window.location.pathname}${window.location.search}${bootstrap.remainingHash}`, { replace: true });
         if (!bootstrap.url || !bootstrap.token) {
-            setAgentState({ fragmentBootstrap: false, activeTab: "setup", connectError: rt(!bootstrap.url ? "addressRequired" : "agentNotFound") });
+            setAgentState({ fragmentBootstrap: false, activeTab: "chat", connectError: rt(!bootstrap.url ? "addressRequired" : "agentNotFound") });
             useAgentStore.getState().openPanel();
             return;
         }
@@ -958,12 +957,12 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             const parsed = new URL(bootstrap.url);
             if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("invalid protocol");
         } catch {
-            setAgentState({ fragmentBootstrap: false, activeTab: "setup", connectError: rt("invalidAddress") });
+            setAgentState({ fragmentBootstrap: false, activeTab: "chat", connectError: rt("invalidAddress") });
             useAgentStore.getState().openPanel();
             return;
         }
         errorLoggedRef.current = false;
-        setAgentState({ url: bootstrap.url.replace(/\/$/, ""), token: bootstrap.token, enabled: true, connected: false, silentConnect: true, fragmentBootstrap: true, confirmTools: false, activity: rt("connecting"), connectError: "", activeTab: "setup" });
+        setAgentState({ url: bootstrap.url.replace(/\/$/, ""), token: bootstrap.token, enabled: true, connected: false, silentConnect: true, fragmentBootstrap: true, confirmTools: false, activity: rt("connecting"), connectError: "", activeTab: "chat" });
     }, [hash, navigate, setAgentState]);
 
     useEffect(() => {
@@ -1313,8 +1312,6 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         setAgentState({ messages: currentMessages.map((message, itemIndex) => itemIndex === index ? { ...message, text: isDelta ? `${message.text}${text}` : mergeStreamText(message.text, text) } : message) });
     };
 
-    const connectionStatus = t(connectError ? "agent.status.failed" : connected ? "agent.status.connected" : enabled ? "agent.status.connecting" : "agent.status.disconnected");
-    const connectionStatusColor = connectError ? "#dc2626" : connected ? "#16a34a" : enabled ? "#d97706" : theme.node.muted;
     const content = (
         <>
             <AgentPanelTabs
@@ -1326,11 +1323,6 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                             <Bot className="size-4" />
                         </span>
                         <div className="hidden text-base font-semibold leading-5 @min-[560px]:block">Agent</div>
-                        <Tooltip title={t("agent.panel.connectionSettings", { status: connectionStatus })} placement="bottom">
-                            <Button size="small" type="text" className="!h-8 !w-8 !min-w-8 !px-0 @min-[560px]:!w-auto @min-[560px]:!min-w-0 @min-[560px]:!px-[7px]" aria-label={t("agent.panel.connectionSettingsLabel", { status: connectionStatus })} icon={<PlugZap className="size-3.5" style={{ color: connectionStatusColor }} />} onClick={() => setAgentState({ activeTab: "setup" })}>
-                                <span className="hidden @min-[560px]:inline">{connectionStatus}</span>
-                            </Button>
-                        </Tooltip>
                     </div>
                 }
                 items={[
@@ -1357,20 +1349,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                 }
             />
 
-            {activeTab === "setup" ? (
-                <AgentConnectView
-                    theme={theme}
-                    url={url}
-                    token={token}
-                    enabled={enabled}
-                    connected={connected}
-                    activity={activity}
-                    connectError={connectError}
-                    onUrlChange={(url) => setAgentState({ url, connectError: "" })}
-                    onTokenChange={(token) => setAgentState({ token, connectError: "" })}
-                    onToggleEnabled={toggleAgentConnection}
-                />
-            ) : activeTab === "skills" ? (
+            {activeTab === "skills" ? (
                 <AgentSkillsView clientId={clientIdRef.current} />
             ) : activeTab === "history" ? (
                 <AgentHistoryView
@@ -1427,7 +1406,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                             const selected = models.find((item) => item.model === model);
                             if (!selected) return;
                             const effort = selected.defaultReasoningEffort || selected.supportedReasoningEfforts[0]?.reasoningEffort;
-                            localStorage.setItem("canvas-agent-model", model);
+                            localStorage.setItem("canvas-agent-model-choice", model);
                             if (effort) localStorage.setItem("canvas-agent-reasoning-effort", effort);
                             setAgentState({ model, ...(effort ? { reasoningEffort: effort } : {}) });
                         }}
@@ -1556,10 +1535,6 @@ async function createMessageAttachmentMetadata(item: AgentAttachment) {
         ? await upscaleDataUrl(item.dataUrl, { targetLongEdge: MESSAGE_PREVIEW_LONG_EDGE, algorithm: "high" })
         : item.dataUrl;
     return { id: item.id, name: item.name, type: item.type, size: item.size, width: item.width, height: item.height, url };
-}
-
-function clamp(value: number, min: number, max: number) {
-    return Math.min(max, Math.max(min, value));
 }
 
 async function importGeneratedImages(endpoint: string, token: string, item: AgentEventItem) {

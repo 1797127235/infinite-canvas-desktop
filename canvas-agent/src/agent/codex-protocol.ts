@@ -104,6 +104,10 @@ type CodexRequestSpec = {
         params: { limit: number; includeHidden: boolean };
         result: { data: CodexModel[]; nextCursor: string | null };
     };
+    "config/read": {
+        params: Record<string, never>;
+        result: { config: JsonRecord };
+    };
     "mcpServerStatus/list": {
         params: { cursor?: string | null; limit?: number | null; detail?: "full" | "toolsAndAuthOnly" | null; threadId?: string | null };
         result: { data: CodexMcpServerStatus[]; nextCursor: string | null };
