@@ -124,17 +124,12 @@ export function startHttpServer() {
         next();
     });
     app.use((req, res, next) => {
-        const url = requestUrl(req, config);
-        if (!setCors(req, res, url, config)) return void res.status(403).json({ ok: false, error: "origin not allowed" });
+        setCors(res);
         if (req.method === "OPTIONS") return void res.json({});
         next();
     });
     app.get("/health", (_req, res) => res.json(session.health()));
-    app.get("/config", (req, res) => res.json({ ok: true, protocolVersion: AGENT_PROTOCOL_VERSION, url: config.url, hasToken: true, ...(isLocalPageOrigin(req) ? { token: config.token } : {}) }));
-    app.use((req, res, next) => {
-        if (validToken(req, requestUrl(req, config), config.token)) return next();
-        res.status(401).json({ ok: false, error: "invalid token" });
-    });
+    app.get("/config", (_req, res) => res.json({ ok: true, protocolVersion: AGENT_PROTOCOL_VERSION, url: config.url }));
     app.get("/events", (req, res) => {
         session.openEvents(requestUrl(req, config), res, ensureSiteWorkspace(config).activeThreadId || "");
     });
@@ -444,7 +439,6 @@ export function startHttpServer() {
         console.log("Infinite Canvas Agent");
         checkVersions();
         console.log(`Local URL: ${config.url}`);
-        console.log(`Connect token: ${config.token}`);
         console.log("Codex MCP is not installed by this command.");
         const selfEntry = process.argv[1] ? `"${process.execPath}" "${process.argv[1]}" mcp` : "";
         if (selfEntry) console.log(`Optional MCP add: codex mcp add infinite-canvas -- ${selfEntry}`);
@@ -527,40 +521,12 @@ function requestUrl(req: Request, config: CanvasAgentConfig) {
     return new URL(req.originalUrl || req.url || "/", config.url);
 }
 
-/** 判断请求是否来自本机页面；token 只下发给本机页面，远程站点读不到。 */
-function isLocalPageOrigin(req: Request) {
-    const origin = req.headers.origin;
-    if (typeof origin !== "string" || !origin) return false;
-    try {
-        const url = new URL(origin);
-        if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-        return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1" || url.hostname === "[::1]";
-    } catch {
-        return false;
-    }
-}
-
-/** 设置跨域响应头并记录通过 token 授权的来源。 */
-function setCors(req: Request, res: Response, url: URL, config: CanvasAgentConfig) {
-    const origin = req.headers.origin;
-    res.setHeader("Access-Control-Allow-Origin", origin || "*");
-    res.setHeader("Access-Control-Allow-Headers", "content-type,x-canvas-agent-token");
+/** 设置跨域响应头。仅监听 127.0.0.1，不做来源与凭证校验。 */
+function setCors(res: Response) {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "content-type");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
     res.setHeader("Access-Control-Allow-Private-Network", "true");
-    if (!origin || req.method === "OPTIONS" || url.pathname === "/health" || url.pathname === "/config") return true;
-    config.origins ||= [];
-    if (validToken(req, url, config.token) && !config.origins.includes(origin)) {
-        config.origins.push(origin);
-        saveConfig(config);
-    }
-    res.setHeader("Vary", "Origin");
-    return config.origins.includes(origin);
-}
-
-/** 校验请求查询参数或请求头中的连接 token。 */
-function validToken(req: Request, url: URL, token: string) {
-    const header = req.headers["x-canvas-agent-token"];
-    return url.searchParams.get("token") === token || header === token || (Array.isArray(header) && header.includes(token));
 }
 
 /** 向 Agent 提示词追加本轮图片附件引用说明。 */

@@ -339,7 +339,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     useEffect(() => () => attachmentUrlsRef.current.forEach((url) => URL.revokeObjectURL(url)), []);
 
     useEffect(() => {
-        if (!clientReady || !enabled || !token.trim()) return;
+        if (!clientReady || !enabled) return;
         localStorage.setItem("canvas-agent-url", endpoint);
         localStorage.setItem("canvas-agent-token", token);
         const clientId = clientIdRef.current;
@@ -908,21 +908,11 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             clearAgentSession({ enabled: false, connected: false, activity: rt("offline"), connectError: "" });
             return;
         }
-        const urlToken = searchParams.get("agentToken") || "";
         const urlEndpoint = searchParams.get("agentUrl") || "";
-        const discovered = urlToken ? null : await discoverAgentConfig(endpoint || DEFAULT_AGENT_URL);
+        const discovered = await discoverAgentConfig(endpoint || DEFAULT_AGENT_URL);
         const nextEndpoint = (urlEndpoint || discovered?.url || endpoint || DEFAULT_AGENT_URL).trim().replace(/\/$/, "");
-        const nextToken = (urlToken || token.trim() || discovered?.token || "").trim();
         if (!nextEndpoint) {
             const text = rt("addressRequired");
-            if (!silent) {
-                setAgentState({ connectError: text });
-                if (!headless) message.warning(text);
-            }
-            return;
-        }
-        if (!nextToken) {
-            const text = rt("agentNotFound");
             if (!silent) {
                 setAgentState({ connectError: text });
                 if (!headless) message.warning(text);
@@ -941,15 +931,15 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             return;
         }
         errorLoggedRef.current = false;
-        setAgentState({ url: nextEndpoint, token: nextToken, enabled: true, connected: false, silentConnect: silent, fragmentBootstrap: false, activity: rt("connecting"), connectError: "", activeTab: "chat" });
+        setAgentState({ url: nextEndpoint, enabled: true, connected: false, silentConnect: silent, fragmentBootstrap: false, activity: rt("connecting"), connectError: "", activeTab: "chat" });
     };
 
     useLayoutEffect(() => {
         const bootstrap = readAgentUrlBootstrap(hash);
         if (!bootstrap) return;
         navigate(`${window.location.pathname}${window.location.search}${bootstrap.remainingHash}`, { replace: true });
-        if (!bootstrap.url || !bootstrap.token) {
-            setAgentState({ fragmentBootstrap: false, activeTab: "chat", connectError: rt(!bootstrap.url ? "addressRequired" : "agentNotFound") });
+        if (!bootstrap.url) {
+            setAgentState({ fragmentBootstrap: false, activeTab: "chat", connectError: rt("addressRequired") });
             useAgentStore.getState().openPanel();
             return;
         }

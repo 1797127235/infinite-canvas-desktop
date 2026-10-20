@@ -25,7 +25,7 @@ function registerCanvasTool(server: McpServer, config: CanvasAgentConfig, name: 
 
 /** 将 MCP 工具调用转发到本地 Canvas Agent HTTP 服务。 */
 async function postCanvasAgentTool(config: CanvasAgentConfig, name: ToolName, input: unknown) {
-    const res = await fetch(`${config.url}/api/tools`, { method: "POST", headers: { "content-type": "application/json", "x-canvas-agent-token": config.token }, body: JSON.stringify({ name, input }) });
+    const res = await fetch(`${config.url}/api/tools`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, input }) });
     const body = (await res.json()) as CanvasAgentToolResponse;
     if (!body.ok) throw new Error(body.error || "tool call failed");
     return body.result;

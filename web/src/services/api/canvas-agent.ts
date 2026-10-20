@@ -80,11 +80,11 @@ export async function revealAgentLocalFile(endpoint: string, token: string, path
     await fetchAgentJson(endpoint, token, "/agent/local-file/reveal", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path }) });
 }
 
-export function resolveAgentMessageAssetUrl(endpoint: string, token: string, value: string) {
+export function resolveAgentMessageAssetUrl(endpoint: string, _token: string, value: string) {
     const match = AGENT_MESSAGE_ASSET_PATTERN.exec(value);
     if (!match) return value.startsWith("agent-asset:") ? "" : value;
     const baseUrl = endpoint.trim().replace(/\/$/, "");
-    return baseUrl && token ? `${baseUrl}/agent/message-assets/${match[1]}/${match[2]}?token=${encodeURIComponent(token)}` : "";
+    return baseUrl ? `${baseUrl}/agent/message-assets/${match[1]}/${match[2]}` : "";
 }
 
 export function fetchCodexSkills(endpoint: string, token: string, forceReload = false) {
