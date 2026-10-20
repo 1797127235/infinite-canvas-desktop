@@ -1,0 +1,304 @@
+---
+title: Packaging as a Windows Desktop App (Electron)
+description: Wrap Infinite Canvas and Canvas Agent into a Windows installer that students open with a double click and configure only through Codex config.toml
+---
+
+# Packaging as a Windows Desktop App (Electron)
+
+This page explains how to package this repository as a Windows desktop app. The target shape: a student receives an installer, double clicks it, and gets a standalone application window. No Node, no Codex CLI, no connection address to fill in.
+
+## 1. Runtime model
+
+```txt
+InfiniteCanvas.exe (Electron main process)
+  ├─ spawns Canvas Agent as a child process via ELECTRON_RUN_AS_NODE → 127.0.0.1:17371
+  │     └─ Canvas Agent then spawns its bundled Codex app-server (stdio)
+  └─ BrowserWindow loads the web frontend (custom protocol)
+```
+
+Three prerequisites are already satisfied by the code:
+
+- Canvas Agent listens on `127.0.0.1` only, with no token and no origin check, so the client can connect as soon as the child process is up
+- The frontend connects to `http://127.0.0.1:17371` by default, and also accepts an injected `window.__CANVAS_AGENT__ = { url }`
+- `@openai/codex` is a dependency of canvas-agent and ships with the package, so students never install the Codex CLI
+
+## 2. Build artifacts
+
+Two artifacts are required before packaging:
+
+```bash
+# Frontend
+cd web && bun install && bun run build      # → web/dist
+
+# Agent: npm install runs tsc automatically through the prepare script
+cd canvas-agent && npm install              # → canvas-agent/dist
+```
+
+The frontend must be installed with bun. `npm install` fails outright on the `@ant-design/pro-components` peer dependency.
+
+## 3. Directory layout
+
+Files inside an Electron `asar` archive cannot be executed as child processes, so the Agent has to live outside the archive:
+
+```txt
+install dir/
+  InfiniteCanvas.exe
+  resources/
+    app.asar              ← main process code + web-dist
+    agent/                ← the whole canvas-agent package (outside asar)
+      dist/
+      node_modules/       ← includes @openai/codex and its platform binary
+      package.json
+      agent-instructions.md
+```
+
+Copy it wholesale into `resources/agent` with `extraResources`; do not rely on `asarUnpack` alone.
+
+## 4. Installing dependencies for Windows (the easiest thing to miss)
+
+The platform binary for `@openai/codex` comes from `optionalDependencies`, and npm installs only the one for **the current platform**:
+
+```txt
+@openai/codex-linux-x64   @openai/codex-linux-arm64
+@openai/codex-darwin-x64  @openai/codex-darwin-arm64
+@openai/codex-win32-x64   @openai/codex-win32-arm64
+```
+
+Running `npm install` on Linux yields `linux-x64`. Shipped inside a Windows package, the Codex app-server exits immediately, which surfaces as "Codex conversation failed to initialize".
+
+So run `canvas-agent/npm install` on a Windows machine or a Windows CI runner. If cross-packaging is unavoidable, install the platform package explicitly:
+
+```bash
+npm install --prefix canvas-agent --no-save \
+  @openai/codex-win32-x64@npm:@openai/codex@0.146.0-win32-x64
+```
+
+The version must match `@openai/codex` in `canvas-agent/package.json`. After packaging, verify this directory exists:
+
+```txt
+resources/agent/node_modules/@openai/codex-win32-x64/
+```
+
+## 5. Load the frontend through a custom protocol, not file://
+
+The frontend uses `createBrowserRouter` (history routing). When loaded over `file://`, navigating to `/canvas/xxx` turns into a request for a file that does not exist, so deep links and page reloads render a blank screen.
+
+Register a privileged protocol that maps `app://` to `web-dist` and falls back to `index.html`:
+
+```js
+// desktop/main.js
+const { app, BrowserWindow, protocol, net } = require("electron");
+const path = require("node:path");
+const fs = require("node:fs");
+const { pathToFileURL } = require("node:url");
+
+const WEB_ROOT = path.join(__dirname, "web-dist");
+const AGENT_PORT = 17371;
+const AGENT_URL = `http://127.0.0.1:${AGENT_PORT}`;
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } },
+]);
+
+function serveWeb() {
+  protocol.handle("app", (request) => {
+    const { pathname } = new URL(request.url);
+    let filePath = path.join(WEB_ROOT, decodeURIComponent(pathname));
+    // Block directory traversal
+    if (!filePath.startsWith(WEB_ROOT)) return new Response("", { status: 403 });
+    // Directory or missing file → SPA fallback
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+      filePath = path.join(WEB_ROOT, "index.html");
+    }
+    return net.fetch(pathToFileURL(filePath).toString());
+  });
+}
+```
+
+Leave `VITE_BASE` at its default of `/`; it does not need to become `./`.
+
+## 6. Start the Agent and wait for readiness
+
+```js
+const { spawn } = require("node:child_process");
+const http = require("node:http");
+
+let agentProcess = null;
+
+function startAgent() {
+  const entry = path.join(process.resourcesPath, "agent", "dist", "index.js");
+  agentProcess = spawn(process.execPath, [entry], {
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1", // Reuse Electron's bundled Node; students install nothing
+      PORT: String(AGENT_PORT),
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true, // No console window flash
+  });
+  agentProcess.stdout.on("data", (chunk) => console.log("[agent]", String(chunk).trim()));
+  agentProcess.stderr.on("data", (chunk) => console.error("[agent]", String(chunk).trim()));
+  agentProcess.on("exit", (code) => console.log("[agent] exited", code));
+}
+
+function pingAgent() {
+  return new Promise((resolve) => {
+    const req = http.get(`${AGENT_URL}/health`, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on("error", () => resolve(false));
+    req.setTimeout(1000, () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
+async function waitForAgent(timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await pingAgent()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  return false;
+}
+```
+
+On first launch the Agent writes `%USERPROFILE%\.infinite-canvas\canvas-agent.json`, which is slower than subsequent launches. A 30 second timeout is sufficient.
+
+## 7. Create the window
+
+```js
+async function createWindow() {
+  const win = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    show: false,
+    backgroundColor: "#0c0a09",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, "preload.js"),
+    },
+  });
+  win.once("ready-to-show", () => win.show());
+  await win.loadURL("app://local/");
+}
+
+app.whenReady().then(async () => {
+  serveWeb();
+  startAgent();
+  const ready = await waitForAgent();
+  if (!ready) {
+    // Show the window anyway; otherwise the student sees "nothing happened".
+    // Prefer rendering an in-window message pointing at the log directory.
+  }
+  await createWindow();
+});
+```
+
+The Agent fails to start when the port is already taken. If several instances may run on one machine, enforce a single instance with `app.requestSingleInstanceLock()` rather than switching ports dynamically.
+
+## 8. Injecting the Agent address (usually unnecessary)
+
+The frontend connects to `http://127.0.0.1:17371` by default; injection is only needed when the port changes. A preload script runs before page scripts:
+
+```js
+// desktop/preload.js
+const { contextBridge } = require("electron");
+
+contextBridge.exposeInMainWorld("__CANVAS_AGENT__", {
+  url: process.env.CANVAS_AGENT_URL || "http://127.0.0.1:17371",
+});
+```
+
+## 9. Reap the child process on exit (mandatory on Windows)
+
+The Agent itself spawns the Codex app-server. Killing only the Agent process on Windows leaves an orphaned `codex.exe` behind, which holds the port and breaks the next launch. Kill the whole process tree:
+
+```js
+const { execFileSync } = require("node:child_process");
+
+function stopAgent() {
+  if (!agentProcess || agentProcess.killed) return;
+  if (process.platform === "win32") {
+    try {
+      execFileSync("taskkill", ["/pid", String(agentProcess.pid), "/T", "/F"], { stdio: "ignore" });
+    } catch {}
+  } else {
+    try {
+      process.kill(-agentProcess.pid, "SIGTERM");
+    } catch {}
+  }
+  agentProcess = null;
+}
+
+app.on("before-quit", stopAgent);
+app.on("window-all-closed", () => app.quit());
+```
+
+## 10. Packaging configuration
+
+`desktop/electron-builder.yml`:
+
+```yaml
+appId: com.yourorg.infinitecanvas
+productName: Infinite Canvas
+directories:
+  output: release
+  buildResources: build
+files:
+  - main.js
+  - preload.js
+  - web-dist/**
+extraResources:
+  - from: ../canvas-agent
+    to: agent
+    filter:
+      - "dist/**"
+      - "node_modules/**"
+      - "package.json"
+      - "agent-instructions.md"
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Infinite Canvas
+```
+
+Lay out the artifacts before building:
+
+```txt
+desktop/
+  main.js
+  preload.js
+  web-dist/            ← copied from web/dist
+  electron-builder.yml
+```
+
+```bash
+cd desktop
+npm install --save-dev electron electron-builder
+npx electron-builder --win
+```
+
+## 11. Acceptance checklist
+
+- [ ] The app starts on a machine without Node installed
+- [ ] The Agent starts on a machine without the Codex CLI (using the bundled Codex)
+- [ ] `resources/agent/node_modules/@openai/codex-win32-x64/` exists
+- [ ] First launch creates `%USERPROFILE%\.infinite-canvas\canvas-agent.json`
+- [ ] The panel connects on open, with no address or token to enter
+- [ ] Reloading the page and opening `/canvas/<id>` directly both render correctly
+- [ ] After quitting, no `InfiniteCanvas.exe` or `codex.exe` remains in Task Manager
+- [ ] Editing only `%USERPROFILE%\.codex\config.toml` changes the model list
+
+## 12. Two Windows specifics
+
+**SmartScreen**: an unsigned installer triggers "Windows protected your PC". Either buy a code signing certificate or tell students up front to click "More info → Run anyway".
+
+**Antivirus false positives**: Electron plus a Node child process plus a bundled Codex binary tends to trip heuristics. Code signing measurably helps.
