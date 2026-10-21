@@ -473,28 +473,28 @@ function updateBuiltinChannelModels(models: ChannelModel[], builtin: ModelChanne
     return merged;
 }
 
-function normalizeChannels(config: AiConfig) {
+/** 旧版回退分支会留下「默认渠道」这类通用名字，内置渠道认出来后换成真实名称；用户自己改过的名字不动。 */
+function builtinChannelName(channel: ModelChannel, builtin: ModelChannel, index: number) {
+    const generic = ["", i18n.t("config.channels.defaultName"), i18n.t("config.channels.indexedName", { index: index + 1 })];
+    return generic.includes(channel.name.trim()) ? builtin.name : channel.name;
+}
+
+export function normalizeChannels(config: AiConfig) {
     const persistedChannels = Array.isArray(config.channels) ? config.channels : [];
     const channels = persistedChannels.map((channel, index) => {
         const builtin = builtinChannelOf(channel);
+        const fallbackName = index === 0 ? i18n.t("config.channels.defaultName") : i18n.t("config.channels.indexedName", { index: index + 1 });
         return createModelChannel({
             ...channel,
             id: channel.id || (index === 0 ? "default" : `channel-${index + 1}`),
-            name: channel.name || (index === 0 ? i18n.t("config.channels.defaultName") : i18n.t("config.channels.indexedName", { index: index + 1 })),
+            name: builtin ? builtinChannelName(channel, builtin, index) : channel.name || fallbackName,
             models: normalizeChannelModels(builtin ? updateBuiltinChannelModels(channel.models, builtin) : channel.models),
         });
     });
-    if (!channels.length) {
-        channels.push(
-            createModelChannel({
-                id: "default",
-                name: i18n.t("config.channels.defaultName"),
-                baseUrl: config.baseUrl || defaultConfig.baseUrl,
-                apiKey: config.apiKey || "",
-                apiFormat: config.apiFormat || defaultConfig.apiFormat,
-                models: normalizeChannelModels([config.model, config.imageModel, config.videoModel, config.textModel, config.audioModel].map(modelOptionName)),
-            }),
-        );
+    // 内置渠道必须始终存在：老配置里可能只有导出的第三方渠道，缺的内置渠道直接追加。
+    for (const builtin of BUILTIN_CHANNELS) {
+        if (channels.some((channel) => normalizedBaseUrlKey(channel.baseUrl) === normalizedBaseUrlKey(builtin.baseUrl))) continue;
+        channels.push(createModelChannel({ ...builtin, models: builtin.models.map((model) => ({ ...model })) }));
     }
     return channels;
 }

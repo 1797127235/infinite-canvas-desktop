@@ -33,6 +33,16 @@ npm run dist         # 两个平台一起打
 
 产物在 `desktop/release/`。
 
+### 应用图标
+
+图标统一放在 `desktop/build/`：
+
+- `build/icon.ico`：Windows 用，7 个尺寸（16/24/32/48/64/128/256）。
+- `build/icons/`：Linux 用，8 个尺寸（16/32/48/64/128/256/512/1024）。
+- `build/icon.png`：1024×1024 母版，上面两套都由它生成。
+
+Linux 必须给多尺寸，不能只给一张 1024：`hicolor` 主题的 `index.theme` 只索引到 `512x512/apps`，只装 1024 尺寸时系统找不到图标，会回退成 Electron 默认图标。重装后若启动器仍显示旧图标，执行一次 `sudo gtk-update-icon-cache -f -t /usr/share/icons/hicolor`。
+
 ### 在 Linux 上打 Windows 包
 
 `electron-builder --win` 只有一步真需要 Wine：NSIS 生成卸载器时要执行一次临时安装包。`bash build-win.sh` 用系统 Wine 完成这一步：
