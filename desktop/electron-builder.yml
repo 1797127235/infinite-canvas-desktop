@@ -53,7 +53,9 @@ linux:
         - AppImage
         - deb
     category: Graphics
-    maintainer: infinite-canvas
+    maintainer: basketikun <basketikun@users.noreply.github.com>
+    icon: build/icon.png
+    syncDesktopName: true
     artifactName: ${productName}-${version}-linux-${arch}.${ext}
 
 electronDownload:

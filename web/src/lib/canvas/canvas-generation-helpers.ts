@@ -1,8 +1,8 @@
 import { defaultConfig, resolveModelForCapability, type AiConfig } from "@/stores/use-config-store";
 import i18n from "@/i18n";
 import { ensureImagePreview, resolveImageUrl, uploadImage } from "@/services/image-storage";
-import { resolveMediaUrl } from "@/services/file-storage";
-import { imageMetadata, referenceUrl } from "@/lib/canvas/canvas-node-factory";
+import { resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
+import { audioMetadata, imageMetadata, referenceUrl, videoMetadata } from "@/lib/canvas/canvas-node-factory";
 import type { NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
@@ -42,12 +42,28 @@ export async function resolveMetadataReferences(metadata: CanvasNodeMetadata) {
     return references.every(Boolean) ? (references as ReferenceImage[]) : null;
 }
 
+export async function hydrateMediaNode(node: CanvasNodeData): Promise<CanvasNodeData> {
+    const metadata = node.metadata;
+    if (!metadata) return node;
+    if (metadata.storageKey) return { ...node, metadata: { ...metadata, content: await resolveMediaUrl(metadata.storageKey, metadata.content) } };
+    // 早期版本会把错误页/鉴权失败当成视频成功保存（远程地址 + 无本地文件），加载时重下一次自愈。
+    const content = metadata.content;
+    if (!content || !/^https?:\/\//i.test(content)) return node;
+    const video = node.type === CanvasNodeType.Video;
+    try {
+        const stored = await uploadMediaFile(content, video ? "video" : "audio");
+        return { ...node, metadata: { ...metadata, ...(video ? videoMetadata(stored) : audioMetadata(stored)) } };
+    } catch {
+        return node;
+    }
+}
+
 export async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
     return Promise.all(
         nodes.map(async (node) => {
             const metadata = node.metadata;
             const content = metadata?.content;
-            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && metadata?.storageKey) return { ...node, metadata: { ...metadata, content: await resolveMediaUrl(metadata.storageKey, content) } };
+            if (node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) return hydrateMediaNode(node);
             if (node.type !== CanvasNodeType.Image || !metadata || !content) return node;
             const images = await Promise.all(
                 (metadata.images || []).map(async (image) => {
@@ -182,7 +198,12 @@ export function isAudioFile(file: File) {
 }
 
 export function buildAngleLabel(params: CanvasImageAngleParams) {
-    const horizontal = params.horizontalAngle === 0 ? i18n.t("canvas.generation.front") : params.horizontalAngle > 0 ? i18n.t("canvas.generation.rotateRight", { angle: params.horizontalAngle }) : i18n.t("canvas.generation.rotateLeft", { angle: Math.abs(params.horizontalAngle) });
+    const horizontal =
+        params.horizontalAngle === 0
+            ? i18n.t("canvas.generation.front")
+            : params.horizontalAngle > 0
+              ? i18n.t("canvas.generation.rotateRight", { angle: params.horizontalAngle })
+              : i18n.t("canvas.generation.rotateLeft", { angle: Math.abs(params.horizontalAngle) });
     const pitch = params.pitchAngle === 0 ? i18n.t("canvas.generation.level") : params.pitchAngle > 0 ? i18n.t("canvas.generation.topDown", { angle: params.pitchAngle }) : i18n.t("canvas.generation.lowAngle", { angle: Math.abs(params.pitchAngle) });
     return i18n.t("canvas.generation.angleLabel", { horizontal, pitch, distance: params.cameraDistance.toFixed(1), lens: i18n.t(params.wideAngle ? "canvas.editors.wide" : "canvas.editors.standard") });
 }

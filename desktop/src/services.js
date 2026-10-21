@@ -61,7 +61,7 @@ async function waitFor(url, timeoutMs) {
 /** 流式下载并回报进度，避免首次启动时界面看起来卡死。 */
 async function download(url, destination, expectedIntegrity, onProgress) {
     const response = await fetch(url);
-    if (!response.ok || !response.body) throw new Error(`下载 Codex 运行时失败：HTTP ${response.status}`);
+    if (!response.ok || !response.body) throw new Error(`下载助手运行时失败：HTTP ${response.status}`);
     const total = Number(response.headers.get("content-length")) || 0;
     const output = fs.createWriteStream(destination);
     const hash = crypto.createHash("sha512");
@@ -82,7 +82,7 @@ async function download(url, destination, expectedIntegrity, onProgress) {
     }
     const actual = `sha512-${hash.digest("base64")}`;
     // 镜像只做缓存转发，内容必须和官方 integrity 完全一致，否则当次取到的文件直接丢弃。
-    if (expectedIntegrity && actual !== expectedIntegrity) throw new Error(`Codex 运行时校验与官方不一致：期望 ${expectedIntegrity}，实际 ${actual}`);
+    if (expectedIntegrity && actual !== expectedIntegrity) throw new Error(`助手运行时校验与官方不一致：期望 ${expectedIntegrity}，实际 ${actual}`);
     onProgress?.({ phase: "codex", received, total: total || received });
 }
 
@@ -115,7 +115,7 @@ async function ensureCodex(onProgress) {
         try {
             await download(`${registry}/@openai/codex/-/${file}`, archive, integrity, onProgress);
             await tar.x({ file: archive, cwd: root, strip: 1 });
-            if (!fs.existsSync(binary)) throw new Error("解压后缺少 Codex 可执行文件");
+            if (!fs.existsSync(binary)) throw new Error("解压后缺少助手可执行文件");
             fs.rmSync(archive, { force: true });
             log(`codex runtime ready from ${registry}`);
             break;
@@ -125,7 +125,7 @@ async function ensureCodex(onProgress) {
             fs.rmSync(archive, { force: true });
         }
     }
-    if (!fs.existsSync(binary)) throw new Error(`无法获取 Codex 运行时：${failure || "没有可用的下载源"}`);
+    if (!fs.existsSync(binary)) throw new Error(`无法获取助手运行时：${failure || "没有可用的下载源"}`);
     // npm 包里的可执行位不一定保留，这里统一补上原生二进制和随包工具的执行权限。
     if (process.platform !== "win32") {
         const vendor = path.join(root, "vendor", target.triple);
@@ -196,7 +196,7 @@ function stopChildren() {
 /** 直接执行 Codex 子命令，用于登录窗口；返回输出而不是打印到终端。 */
 function runCodex(args, { input, detached = false } = {}) {
     const binary = codexBinPath();
-    if (!fs.existsSync(binary)) throw new Error("Codex 运行时尚未下载完成");
+    if (!fs.existsSync(binary)) throw new Error("助手运行时尚未下载完成");
     const child = spawn(binary, args, { windowsHide: true, detached, stdio: [input ? "pipe" : "ignore", "pipe", "pipe"] });
     if (input) {
         child.stdin.end(input);

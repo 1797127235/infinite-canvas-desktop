@@ -320,10 +320,10 @@ async function generateCodexSkillDraftNow(emit: AgentEmit, cwd: string, input: C
         try {
             value = JSON.parse(raw);
         } catch {
-            throw new Error("Codex 返回的 Skill 草稿不是有效 JSON");
+            throw new Error("助手返回的 Skill 草稿不是有效 JSON");
         }
         const parsed = skillDraftSchema.safeParse(value);
-        if (!parsed.success) throw new Error("Codex 返回的 Skill 草稿格式不正确");
+        if (!parsed.success) throw new Error("助手返回的 Skill 草稿格式不正确");
         assertDraftHasNoSensitiveValues(parsed.data, input.source === "canvas" ? canvasPrivateValues(input.snapshot) : []);
         return parsed.data;
     } finally {
@@ -537,7 +537,7 @@ async function getCodexApp(emit: AgentEmit) {
 /** 校验线程是否属于指定工作空间。 */
 function assertThreadWorkspace(thread: unknown, cwd?: string) {
     if (!cwd || threadInWorkspace(thread, cwd)) return;
-    throw new Error("该 Codex 会话不属于当前画布工作空间");
+    throw new Error("该助手会话不属于当前画布工作空间");
 }
 
 /** 判断线程工作目录是否与当前工作空间一致。 */

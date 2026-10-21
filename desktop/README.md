@@ -31,7 +31,18 @@ npm run dist:linux   # AppImage + deb（x64）
 npm run dist         # 两个平台一起打
 ```
 
-产物在 `desktop/release/`。安装包故意**不含** Codex 平台二进制（单平台约 350MB），首次启动时按平台从 npm registry 下载并解压到用户数据目录：
+产物在 `desktop/release/`。
+
+### 在 Linux 上打 Windows 包
+
+`electron-builder --win` 只有一步真需要 Wine：NSIS 生成卸载器时要执行一次临时安装包。`bash build-win.sh` 用系统 Wine 完成这一步：
+
+```bash
+sudo apt-get install -y --no-install-recommends wine64   # 自带 i386-windows，32 位 NSIS 走 WoW64
+bash build-win.sh                                        # 等价于 USE_SYSTEM_WINE=true electron-builder --win --x64
+```
+
+不要用 electron-builder 自带的 Wine 便携包（`toolsets.wine`）：`wine@1.0.0/1.0.1` 的 Linux 包只有 `x86_64-unix`，缺 `lib/wine/x86_64-windows` 的 PE 内置 DLL，跑安装包会 `failed to load kernel32.dll, status c0000135`。Debian/Ubuntu 只装 `wine64` 时没有 `/usr/bin/wine`，脚本会补一个转发脚本到 `~/.local/bin/wine`。安装包故意**不含** Codex 平台二进制（单平台约 350MB），首次启动时按平台从 npm registry 下载并解压到用户数据目录：
 
 - Windows：`%APPDATA%/Infinite Canvas/codex/<version>/vendor/x86_64-pc-windows-msvc/bin/codex.exe`
 - Linux：`~/.config/Infinite Canvas/codex/<version>/vendor/<triple>/bin/codex`

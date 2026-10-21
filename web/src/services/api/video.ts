@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import i18n from "@/i18n";
 import { dataUrlToFile, readFileAsDataUrl } from "@/lib/image-utils";
 import { clampVideoSeconds, computeVideoSize, inferVideoRatio } from "@/lib/media-size";
-import { getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { getMediaBlob, isMediaUnavailableError, mediaAuthHeaders, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { boolConfig, buildApiUrl, modelOptionName, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
@@ -96,26 +96,29 @@ async function createPluginVideoTask(config: AiConfig, model: string, script: st
     const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
     const videos = await Promise.all((options?.videos || []).map((video) => referenceMediaToFile(video, "ref.mp4", "invalidReferenceVideo", options)));
     const audios = await Promise.all((options?.audios || []).map((audio) => referenceMediaToFile(audio, "ref.mp3", "invalidReferenceAudio", options)));
-    const result = videoPluginResult(
-        await runModelPlugin({
-            capability: "video",
-            script,
-            config,
-            prompt,
-            images: refs,
-            videos,
-            audios,
-            params: {
-                seconds: normalizeVideoSeconds(config.videoSeconds),
-                size: normalizeVideoSize(config.size, config.vquality),
-                resolution: normalizeVideoResolution(config.vquality),
-                ratio: videoAspectRatio(config.size),
-                generateAudio: boolConfig(config.videoGenerateAudio, true),
-                watermark: boolConfig(config.videoWatermark, false),
-                mode: resolveVideoMode(config.videoMode, refs.length),
-            },
-            signal: options?.signal,
-        }),
+    const result = withMediaBaseUrl(
+        videoPluginResult(
+            await runModelPlugin({
+                capability: "video",
+                script,
+                config,
+                prompt,
+                images: refs,
+                videos,
+                audios,
+                params: {
+                    seconds: normalizeVideoSeconds(config.videoSeconds),
+                    size: normalizeVideoSize(config.size, config.vquality),
+                    resolution: normalizeVideoResolution(config.vquality),
+                    ratio: videoAspectRatio(config.size),
+                    generateAudio: boolConfig(config.videoGenerateAudio, true),
+                    watermark: boolConfig(config.videoWatermark, false),
+                    mode: resolveVideoMode(config.videoMode, refs.length),
+                },
+                signal: options?.signal,
+            }),
+        ),
+        config.baseUrl,
     );
     const id = nanoid();
     pluginVideoResults.set(id, result);
@@ -139,11 +142,32 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
     if (result.url) {
         try {
             return await uploadMediaFile(result.url, "video");
-        } catch {
+        } catch (error) {
+            if (isMediaUnavailableError(error)) throw error;
             return { url: result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4" };
         }
     }
     throw new Error(apiText("noPlayableVideo"));
+}
+
+/**
+ * 渠道常把视频地址写成相对路径（如 /videos/xxx.mp4），必须按渠道 Base URL 补全：
+ * 直接 fetch 相对地址会打到应用自身域名，取回的 index.html 会被当成视频保存。
+ */
+function withMediaBaseUrl(result: VideoGenerationResult, baseUrl: string): VideoGenerationResult {
+    if (!result.url) return result;
+    return { ...result, url: absoluteMediaUrl(result.url, baseUrl) };
+}
+
+function absoluteMediaUrl(url: string, baseUrl: string) {
+    if (!url || /^(https?:|blob:|data:)/i.test(url)) return url;
+    const base = baseUrl.trim();
+    if (!base) return url;
+    try {
+        return new URL(url, `${base.replace(/\/+$/, "")}/`).toString();
+    } catch {
+        return url;
+    }
 }
 
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
@@ -194,7 +218,7 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, 
     try {
         const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), signal: options?.signal })).data);
         const url = videoResultUrl(video);
-        if (url) return { status: "completed", result: await videoResultFromUrl(url, options) };
+        if (url) return { status: "completed", result: await videoResultFromUrl(absoluteMediaUrl(url, config.baseUrl), options) };
         if (video.status === "completed") {
             const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), responseType: "blob", signal: options?.signal });
             await assertVideoBlob(content.data);
@@ -208,14 +232,19 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, 
 }
 
 async function videoResultFromUrl(url: string, options?: RequestOptions): Promise<VideoGenerationResult> {
+    let blob: Blob;
     try {
-        const response = await axios.get<Blob>(withLocalProxy(url), { responseType: "blob", signal: options?.signal });
-        await assertVideoBlob(response.data);
-        return { blob: response.data };
+        const response = await axios.get<Blob>(withLocalProxy(url), { responseType: "blob", headers: mediaAuthHeaders(url), signal: options?.signal });
+        blob = response.data;
     } catch (error) {
         if (axios.isCancel(error) || options?.signal?.aborted) throw error;
+        const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+        // 鉴权 / 不存在这类失败降级成远程地址也没法播（<video> 带不了请求头），直接报错。
+        if (status === 401 || status === 403 || status === 404) throw new Error(readAxiosError(error, apiText("mediaDownloadFailed", { status })));
         return { url, mimeType: "video/mp4" };
     }
+    await assertVideoBlob(blob);
+    return { blob };
 }
 
 async function createGeminiVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
@@ -233,16 +262,25 @@ async function createGeminiVideoTask(config: AiConfig, model: string, prompt: st
     if (videos[0]) instance.video = await fileToGeminiInline(videos[0]);
     if (audios[0]) instance.audio = await fileToGeminiInline(audios[0]);
     try {
-        const created = unwrapEnvelope((await axios.post<ApiEnvelope<GeminiVideoOperation>>(geminiVideoUrl(config, model, "predictLongRunning"), {
-            instances: [instance],
-            parameters: {
-                aspectRatio: videoAspectRatio(config.size),
-                durationSeconds: Number(normalizeVideoSeconds(config.videoSeconds)) || 8,
-                resolution: normalizeVideoResolution(config.vquality),
-                generateAudio: boolConfig(config.videoGenerateAudio, true),
-                addWatermark: boolConfig(config.videoWatermark, false),
-            },
-        }, { headers: geminiVideoHeaders(config), signal: options?.signal })).data, apiText("noVideoTask"));
+        const created = unwrapEnvelope(
+            (
+                await axios.post<ApiEnvelope<GeminiVideoOperation>>(
+                    geminiVideoUrl(config, model, "predictLongRunning"),
+                    {
+                        instances: [instance],
+                        parameters: {
+                            aspectRatio: videoAspectRatio(config.size),
+                            durationSeconds: Number(normalizeVideoSeconds(config.videoSeconds)) || 8,
+                            resolution: normalizeVideoResolution(config.vquality),
+                            generateAudio: boolConfig(config.videoGenerateAudio, true),
+                            addWatermark: boolConfig(config.videoWatermark, false),
+                        },
+                    },
+                    { headers: geminiVideoHeaders(config), signal: options?.signal },
+                )
+            ).data,
+            apiText("noVideoTask"),
+        );
         if (!created.name) throw new Error(apiText("noVideoTaskId"));
         return { id: created.name, provider: "gemini", model };
     } catch (error) {
@@ -258,7 +296,7 @@ async function pollGeminiVideoTask(config: AiConfig, task: VideoGenerationTask, 
         const uri = state.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
         if (!uri) return { status: "failed", error: apiText("noPlayableVideo") };
         const url = uri.includes("key=") ? uri : `${uri}${uri.includes("?") ? "&" : "?"}key=${config.apiKey}`;
-        return { status: "completed", result: await videoResultFromUrl(url, options) };
+        return { status: "completed", result: await videoResultFromUrl(absoluteMediaUrl(url, config.baseUrl), options) };
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("videoTaskQueryFailed")));
     }
@@ -376,17 +414,8 @@ function readApiErrorMessage(value: unknown): string {
     if (typeof value !== "object") return "";
     const payload = value as { msg?: unknown; message?: unknown; error?: unknown; detail?: unknown };
     // error may be a string or an object containing a message.
-    const errorMsg =
-        typeof payload.error === "string"
-            ? payload.error
-            : (payload.error as { message?: unknown })?.message;
-    return (
-        readApiErrorMessage(payload.msg) ||
-        readApiErrorMessage(payload.message) ||
-        readApiErrorMessage(errorMsg) ||
-        readApiErrorMessage(payload.detail) ||
-        ""
-    );
+    const errorMsg = typeof payload.error === "string" ? payload.error : (payload.error as { message?: unknown })?.message;
+    return readApiErrorMessage(payload.msg) || readApiErrorMessage(payload.message) || readApiErrorMessage(errorMsg) || readApiErrorMessage(payload.detail) || "";
 }
 
 function readAxiosError(error: unknown, fallback: string) {
@@ -407,15 +436,12 @@ function statusMessage(status: number | undefined, fallback: string) {
 }
 
 async function assertVideoBlob(blob: Blob) {
-    if (!blob.type.includes("json")) return;
-    let payload: { code?: number; msg?: string; error?: { message?: string } };
-    try {
-        payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; error?: { message?: string } };
-    } catch {
-        return;
+    const type = blob.type.toLowerCase();
+    if (type.startsWith("text/") || type.includes("json")) {
+        // 常见的失败回包：错误页、鉴权失败 JSON；能读出可读信息就直接抛给用户。
+        const preview = (await blob.text()).slice(0, 200);
+        throw new Error(readApiErrorMessage(preview) || apiText("mediaNotPlayable", { type: blob.type || apiText("mediaUnknownType") }));
     }
-    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(readApiErrorMessage(payload) || apiText("videoDownloadFailed"));
-    if (payload.error?.message) throw new Error(readApiErrorMessage(payload.error.message) || payload.error.message);
 }
 
 function isPublicMediaUrl(value: string) {

@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
 import { AGNES_CHANNEL } from "@/constant/agnes-channel";
+import { C2A_CHANNEL } from "@/constant/c2a-channel";
 import { desktopShellProxyUrl } from "@/constant/desktop-shell";
 
 export type ApiCallFormat = "openai" | "gemini";
@@ -81,12 +82,15 @@ const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
 export const LOCAL_PROXY_PACKAGE = "@basketikun/canvas-proxy";
 export const DEFAULT_LOCAL_PROXY_URL = "http://127.0.0.1:23210";
 
+/** 内置渠道：脚本随仓库维护，用户只需要填 API Key。 */
+const BUILTIN_CHANNELS: ModelChannel[] = [AGNES_CHANNEL, C2A_CHANNEL];
+
 export const defaultConfig: AiConfig = {
     channelMode: "local",
     baseUrl: AGNES_CHANNEL.baseUrl,
     apiKey: "",
     apiFormat: "openai",
-    channels: [AGNES_CHANNEL],
+    channels: BUILTIN_CHANNELS,
     model: "agnes-cn::agnes-image-2.5-flash",
     imageModel: "agnes-cn::agnes-image-2.5-flash",
     videoModel: "agnes-cn::agnes-video-2.5",
@@ -103,7 +107,7 @@ export const defaultConfig: AiConfig = {
     videoMode: "frames",
     systemPrompt: "",
     reasoningEffort: "auto",
-    models: ["agnes-cn::agnes-image-2.5-flash", "agnes-cn::agnes-video-2.5", "agnes-cn::agnes-video-2.5-flash", "agnes-cn::agnes-2.5-flash"],
+    models: modelOptionsFromChannels(BUILTIN_CHANNELS),
     quality: "auto",
     size: "1:1",
     background: "",
@@ -293,7 +297,9 @@ export function normalizeChannelModels(models: Array<string | ChannelModel> | un
         if (!name || seen.has(name)) continue;
         seen.add(name);
         const capability = typeof item === "string" ? guessCapability(name) : item.capability || guessCapability(name);
-        const script = typeof item === "string" ? undefined : item.script?.trim() || undefined;
+        // Persisted channels may predate model scripts; fall back to the bundled script by name.
+        const builtinScript = BUILTIN_CHANNELS.flatMap((channel) => channel.models).find((model) => model.name === name)?.script;
+        const script = (typeof item === "string" ? undefined : item.script?.trim()) || builtinScript;
         result.push({ name, capability, script });
     }
     return result;
@@ -450,16 +456,34 @@ export function resolveModelRequestConfig(config: AiConfig, value: string) {
     };
 }
 
+/** 按接口地址认出内置渠道，用来同步随仓库维护的调用脚本。 */
+function builtinChannelOf(channel: ModelChannel) {
+    return BUILTIN_CHANNELS.find((builtin) => normalizedBaseUrlKey(builtin.baseUrl) === normalizedBaseUrlKey(channel.baseUrl));
+}
+
+function updateBuiltinChannelModels(models: ChannelModel[], builtin: ModelChannel) {
+    const merged = models.map((model) => {
+        const match = builtin.models.find((item) => item.name === model.name);
+        return match ? { ...model, script: match.script } : model;
+    });
+    // 内置渠道新增模型时，已保存的渠道也要跟上，否则下拉里看不到新模型。
+    for (const item of builtin.models) {
+        if (!merged.some((model) => model.name === item.name)) merged.push({ name: item.name, capability: item.capability, script: item.script });
+    }
+    return merged;
+}
+
 function normalizeChannels(config: AiConfig) {
     const persistedChannels = Array.isArray(config.channels) ? config.channels : [];
-    const channels = persistedChannels.map((channel, index) =>
-        createModelChannel({
+    const channels = persistedChannels.map((channel, index) => {
+        const builtin = builtinChannelOf(channel);
+        return createModelChannel({
             ...channel,
             id: channel.id || (index === 0 ? "default" : `channel-${index + 1}`),
             name: channel.name || (index === 0 ? i18n.t("config.channels.defaultName") : i18n.t("config.channels.indexedName", { index: index + 1 })),
-            models: normalizeChannelModels(channel.models),
-        }),
-    );
+            models: normalizeChannelModels(builtin ? updateBuiltinChannelModels(channel.models, builtin) : channel.models),
+        });
+    });
     if (!channels.length) {
         channels.push(
             createModelChannel({

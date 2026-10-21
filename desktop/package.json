@@ -4,6 +4,11 @@
     "version": "0.20.0",
     "private": true,
     "description": "无限画布桌面版：内置 Canvas Agent 与本地代理，用户无需安装任何依赖",
+    "homepage": "https://github.com/basketikun/infinite-canvas",
+    "author": {
+        "name": "basketikun"
+    },
+    "desktopName": "infinite-canvas.desktop",
     "main": "src/main.js",
     "license": "MIT",
     "scripts": {

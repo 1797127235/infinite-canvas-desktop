@@ -100,7 +100,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
         const confirmed = await new Promise<boolean>((resolve) => {
             modal.confirm({
                 title: t("config.importConfirmTitle"),
-                content: t("config.importConfirmContent", { channels: config.channels.length }),
+                content: t("config.importConfirmContent"),
                 okText: t("config.importConfirmOk"),
                 cancelText: t("common.cancel"),
                 onOk: () => resolve(true),
@@ -110,10 +110,9 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
         if (!confirmed) return;
         try {
             const result = await importAppConfig(file);
-            message.success(t("config.imported"));
-            if (result.keptKeys || result.keptWebdavPassword) {
-                message.info(t("config.importKeptCredentials", { count: result.keptKeys }));
-            }
+            message.success(t("config.imported", { added: result.added, updated: result.updated }));
+            if (result.keptKeys) message.info(t("config.importKeptCredentials", { count: result.keptKeys }));
+            if (result.keptWebdavPassword) message.info(t("config.importKeptWebdavPassword"));
         } catch (error) {
             message.error(error instanceof Error ? error.message : t("config.importFailed"));
         } finally {

@@ -1,0 +1,29 @@
+{
+  "source": "https://www.codex2api.com/api/v1/marketplace/models",
+  "count": 23,
+  "groups": [
+    "[haishu-plus-分流1]0.15x",
+    "[haishu-plus-分流2]0.15x",
+    "[haishu-pro] 0.3x",
+    "[haishu-pro稳定] 0.5x",
+    "[haishu-openai-官key] 1.2x",
+    "[haishu-openai-az官key] 4.5x",
+    "[haishu-image2.5]超分1-4k",
+    "[haishu-生图-mj]0.4起一张",
+    "[haishu-image2.5]az官key0.2一张",
+    "[haishu-kimi]0.5x",
+    "[haishu-deepseek]0.4x",
+    "[haishu-glm]0.5x",
+    "[haishu-minmax] 0.3x",
+    "[haishu-jev]-1x",
+    "[haishu-gemin] 0.4x",
+    "[haishu-minmax-h3] 1.2x",
+    "[haishu-seed按token] 1.2x",
+    "[haishu-万象] 1.2x",
+    "[haishu-可灵] 1.2x",
+    "[haishu-grok] 0.3x",
+    "[haishu-kiro] 0.2x",
+    "[haishu-kiro正价] 0.5x",
+    "[haishu-Max] 1.8x"
+  ]
+}

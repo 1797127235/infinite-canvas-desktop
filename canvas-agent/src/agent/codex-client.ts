@@ -267,7 +267,7 @@ export class CodexAppClient {
         this.silentThreadIds.add(threadId);
         const result = await this.startTurn(threadId, prompt, [], "request", model, effort, undefined, undefined, undefined, outputSchema);
         const output = String(field(result, "output") || "").trim();
-        if (!output) throw new Error("Codex 没有返回 Skill 草稿");
+        if (!output) throw new Error("助手没有返回 Skill 草稿");
         return output;
     }
 

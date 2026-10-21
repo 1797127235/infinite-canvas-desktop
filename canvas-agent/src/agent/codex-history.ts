@@ -89,7 +89,7 @@ export function threadMessages(thread: unknown, planUpdates: CodexPlanUpdate[] =
             }
             if (type === "agentMessage") {
                 const text = String(field(item, "text") || "").trim();
-                if (text) push({ id, role: "assistant", title: "Codex", text });
+                if (text) push({ id, role: "assistant", title: "助手", text });
             }
             if (type === "mcpToolCall") {
                 const tool = String(field(item, "tool") || "工具调用");
@@ -454,7 +454,7 @@ function planStatus(tasks: Array<{ status: string }>, turnStatus?: string) {
 /** 将常见 Codex 错误转换为普通用户可理解的提示。 */
 function userFacingCodexError(message: string) {
     if (/selected model is at capacity/i.test(message)) return { title: "模型暂时繁忙", text: "当前选择的模型请求量过大，暂时无法处理。请稍后重试，或切换其他模型后再试。" };
-    return { title: "任务失败", text: message || "Codex 未能完成本次任务，请稍后重试。" };
+    return { title: "任务失败", text: message || "助手未能完成本次任务，请稍后重试。" };
 }
 
 /** 提取用户输入条目中的文本与附件占位信息。 */

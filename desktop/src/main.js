@@ -105,7 +105,7 @@ function openAccountWindow() {
     accountWindow = new BrowserWindow({
         width: 520,
         height: 460,
-        title: "Codex 账号",
+        title: "助手账号",
         backgroundColor: "#0c0a09",
         webPreferences: { preload, contextIsolation: true, nodeIntegration: false, sandbox: true },
     });
@@ -125,7 +125,7 @@ function runCodexCommand(args, options = {}) {
             clearTimeout(timer);
             resolve(result);
         };
-        const timer = setTimeout(() => finish({ ok: false, text: "等待 Codex 响应超时，请重试。" }), CODEX_LOGIN_TIMEOUT_MS);
+        const timer = setTimeout(() => finish({ ok: false, text: "等待助手响应超时，请重试。" }), CODEX_LOGIN_TIMEOUT_MS);
         let child;
         let output;
         try {
@@ -156,7 +156,7 @@ function registerIpc() {
         const result = await runCodexCommand(["login"]);
         const url = result.text.match(/https:\/\/[^\s"'<>]+/)?.[0];
         if (url) shell.openExternal(url);
-        return { ok: result.ok, text: result.text || (url ? "已在浏览器打开登录页面。" : "Codex 未输出登录地址，请重试。") };
+        return { ok: result.ok, text: result.text || (url ? "已在浏览器打开登录页面。" : "助手未输出登录地址，请重试。") };
     });
 }
 
@@ -166,7 +166,7 @@ function buildMenu() {
             {
                 label: "文件",
                 submenu: [
-                    { label: "Codex 账号…", accelerator: "CommandOrControl+Shift+A", click: openAccountWindow },
+                    { label: "助手账号…", accelerator: "CommandOrControl+Shift+A", click: openAccountWindow },
                     { type: "separator" },
                     { role: "quit", label: "退出", accelerator: "CommandOrControl+Q" },
                 ],
