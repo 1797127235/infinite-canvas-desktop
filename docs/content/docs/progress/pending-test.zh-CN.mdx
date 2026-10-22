@@ -9,7 +9,9 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 - Linux 安装包：`deb` 与 `AppImage` 均应带应用图标（16/32/48/64/128/256/512/1024 八个尺寸，不只有 1024），安装后启动器与任务栏显示画布图标而不是 Electron 默认图标，名称显示「Infinite Canvas」且窗口能正确归组；`dpkg -i` 应无依赖缺失，卸载后不留残留。从零启动时首次会从 npmmirror 下载 Codex 运行时并做 sha512 校验，随后本地代理、Canvas Agent、网页服务依次就绪，页面可正常打开。默认端口 `17370` 被占用时应明确报错并可经 `CANVAS_DESKTOP_WEB_PORT` 换端口。
 
-- Windows 安装包：NSIS 安装向导、桌面快捷方式、开始菜单项和卸载项都应显示画布图标，安装目录可选，卸载后不留残留；从零启动时同样下载 Codex 运行时（`%APPDATA%/Infinite Canvas/codex/`）后打开画布，Agent 已连接且无需填写地址与 token。
+- 安装包体积：重新打包后 Windows 安装包应约 157MB、解包后约 402MB / 2493 个文件（此前为 181MB / 508MB / 4734）。安装过程应明显快于之前，安装后画布、Agent 面板和 Codex 助手功能均正常；Electron 只剩 `en-US.pak` 与 `zh-CN.pak` 两个语言包，界面语言不受影响。
+
+- Windows 安装包：- Windows 安装包：NSIS 安装向导、桌面快捷方式、开始菜单项和卸载项都应显示画布图标，安装目录可选，卸载后不留残留；从零启动时同样下载 Codex 运行时（`%APPDATA%/Infinite Canvas/codex/`）后打开画布，Agent 已连接且无需填写地址与 token。
 - 桌面首次配置向导：Windows/Linux 全新安装应在下载和启动 Codex/Agent 前显示 C2A 配置页，Base URL 默认 `https://www.codex2api.com`。输入一把 API Key 拉取 C2A `/v1/models` 全部模型；模型元数据从 models.dev 补齐，同一 ID 多 provider 时按 `canonical_model_id` 取原厂条目、无原厂条目则取该组上下文长度众数，仍查不到时按同家族推断并标注「推断」，彻底无法解析的文本模型不出现在助手列表里，models.dev 整体不可用时保留全部文本模型。新用户可多选文本模型并指定一个默认模型，所选模型在 Codex 选择器中可切换、上下文长度按单个模型设置；没有可选文本模型时仍能保存画布渠道并稍后设置助手。检测到 Codex 安装或已有配置时应保留其 provider、登录凭据和模型配置，只初始化画布 C2A 渠道；桌面端不接管已有的用户配置文件。画布侧应获得该 Key 可见的完整模型列表、保留内置视频脚本及其他本地渠道，并优先使用可用渠道作为生图/视频/文本默认模型。模型列表请求失败时不落盘，模型元数据失败时仍可继续；完成后重启不得覆盖用户在软件设置里后续修改的配置。Key 不得出现在 URL、日志、`config.toml`、模型目录 JSON 或发往 models.dev 的请求中；Codex 使用的 Key 通过系统钥匙串加密保存，Linux `basic_text` 后端应明确阻止 Codex 配置并提示启用 GNOME Keyring / KDE Wallet。画布渠道 Key 沿用软件现有的浏览器本地配置存储方式。Windows/Linux 的 splash 布局、焦点/键盘操作、错误提示和启动失败重试均需人工验收。Linux 没有可用系统钥匙串时应如何继续（仅提示安装 GNOME Keyring/KDE Wallet，或经用户明确确认后选择降级）待用户确认，不能自动明文存储。
 
 - Agnes 内置生图和生视频脚本：生图文生图应使用 `return_base64: true`，图生图/多图合成应使用 `extra_body.image` 和 `extra_body.response_format: "b64_json"`，并按官方尺寸档位与比例发送；生视频应保存创建响应中的 `video_id`，使用精确模型名轮询 `/agnesapi`，完成后读取顶层 `url`。Agnes 视频参考素材必须是服务端可公开访问的 HTTP(S) URL；当前无限画布提供的本地 Data URI 图片、视频和音频不能直接作为 Agnes 视频参考，应显示明确错误而不是发送无效请求。

@@ -29,6 +29,12 @@ extraResources:
       filter:
           - "**/*"
           - "!**/@openai/codex-*/**"
+          # 运行期只加载 js/cjs/mjs；类型声明、source map、文档和包内 .ts 源码都不会被执行，
+          # 但会显著拉长 NSIS 解包和杀毒扫描时间。
+          - "!**/*.d.ts"
+          - "!**/*.map"
+          - "!**/*.md"
+          - "!**/*.ts"
     - from: ../canvas-proxy/index.js
       to: canvas-proxy/index.js
     - from: ../canvas-proxy/package.json
@@ -36,6 +42,10 @@ extraResources:
 
 win:
     icon: build/icon.ico
+    # Electron 默认带 55 个语言包（约 47MB）；只保留中英文。
+    electronLanguages:
+        - zh-CN
+        - en-US
     target:
         - target: nsis
           arch:
