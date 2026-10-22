@@ -7,6 +7,7 @@ import type { CanvasSnapshot } from "../canvas/types.js";
 import { logger } from "../utils/logger.js";
 import { errorMessage, field, type JsonRecord } from "../utils/value.js";
 import { CodexAppClient, CodexReportedError } from "./codex-client.js";
+import { shouldUseCodexModelCatalog } from "./codex-model-catalog.js";
 import { codexEventHistory } from "./codex-event-history.js";
 import { settledTurnIds, summarizeCodexThread, threadMessages } from "./codex-history.js";
 import { messageMetadataStore } from "./message-metadata.js";
@@ -137,9 +138,8 @@ async function readCodexApiKey() {
 }
 
 /** 从自定义 provider 的 /models 端点读取真实可用模型；不是自定义 provider 时返回 null。 */
-async function listProviderModels(emit: AgentEmit) {
-    const app = await getCodexApp(emit);
-    const { config } = await app.readConfig();
+async function listProviderModels(config: JsonRecord) {
+    if (shouldUseCodexModelCatalog(config)) return null;
     const providerId = String(field(config, "model_provider") || "").trim();
     if (!providerId || BUILTIN_PROVIDER_IDS.has(providerId)) return null;
     const providers = field(config, "model_providers");
@@ -179,8 +179,10 @@ async function listProviderModels(emit: AgentEmit) {
 /** 查询可用于新任务的模型：自定义 provider 优先用它的真实清单，否则回退到 Codex 内置清单。 */
 export async function listCodexModels(emit: AgentEmit) {
     const app = await getCodexApp(emit);
+    const { config } = await app.readConfig();
+    if (shouldUseCodexModelCatalog(config as JsonRecord)) return await app.listModels();
     try {
-        const providerModels = await listProviderModels(emit);
+        const providerModels = await listProviderModels(config as JsonRecord);
         if (providerModels) return { data: providerModels, nextCursor: null };
     } catch (error) {
         logger.warn("Failed to list provider models, falling back to Codex model list", { error: errorMessage(error) });
