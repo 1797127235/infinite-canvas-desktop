@@ -12,6 +12,12 @@ Windows / Linux 桌面版。目标是把网页版需要用户自己做的事全�
 | 本地代理 | `npx @basketikun/canvas-proxy@latest` | 主进程直接拉起，网页自动启用 |
 | 跨域 | 需要代理或直连 | Agent 走同源反代（`/agent-api`），AI 接口走内置代理 |
 
+## 首次启动配置
+
+第一次启动时，桌面向导会用默认 C2A Base URL 拉取该 Key 可见的全部模型。新用户可多选 Codex 文本模型并指定默认项；模型元数据（上下文长度、输入模态、推理能力）从 models.dev 补齐；同一 ID 挂在多个 provider 下时按 `canonical_model_id` 取原厂条目，没有原厂条目则取该组上下文长度的众数；仍查不到时按同家族推断（`grok-4.7-build-fast` 取 `grok-4.7`，要求剥到至少两段），推断值在向导里标注「推断」。彻底查不到元数据、也无法同家族推断的文本模型不会进入助手模型列表，画布渠道仍保留 Key 可见的全部模型及内置视频脚本；models.dev 整体不可用时保留全部文本模型，不让离线阻断助手配置。
+
+检测到已有 Codex 配置或可执行文件时，向导只设置画布 C2A 渠道，不修改用户的 Codex provider、登录状态或配置文件。全新用户的 Codex provider 和多模型目录写入应用专属 `userData/codex-home/`，不触碰 `~/.codex/config.toml`。助手用的 C2A Key 由 Electron `safeStorage` 通过系统凭据后端加密；Linux 处于 `basic_text` 降级后端时会拒绝配置助手并提示启用 GNOME Keyring 或 KDE Wallet，不会静默写入明文。画布渠道 Key 沿用软件现有的浏览器本地配置存储机制。
+
 ## 开发运行
 
 ```bash

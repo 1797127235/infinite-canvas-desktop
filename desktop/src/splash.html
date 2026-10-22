@@ -2,129 +2,243 @@
 <html lang="zh-CN">
     <head>
         <meta charset="UTF-8" />
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
-        <title>无限画布</title>
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Infinite Canvas</title>
         <style>
-            :root {
-                color-scheme: dark;
-            }
-            body {
-                margin: 0;
-                height: 100vh;
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-                gap: 18px;
-                padding: 0 40px;
-                background: #0c0a09;
-                color: #f5f5f4;
-                font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
-                -webkit-app-region: drag;
-                user-select: none;
-            }
-            h1 {
-                margin: 0;
-                font-size: 17px;
-                font-weight: 600;
-                letter-spacing: 0.02em;
-            }
-            p {
-                margin: 0;
-                font-size: 13px;
-                line-height: 1.7;
-                color: #a8a29e;
-            }
-            .bar {
-                height: 3px;
-                border-radius: 999px;
-                background: #292524;
-                overflow: hidden;
-            }
-            .bar span {
-                display: block;
-                height: 100%;
-                width: 0;
-                border-radius: 999px;
-                background: #f97316;
-                transition: width 0.3s ease;
-            }
-            .bar span.indeterminate {
-                width: 40%;
-                animation: slide 1.2s ease-in-out infinite;
-            }
-            @keyframes slide {
-                0% {
-                    transform: translateX(-100%);
-                }
-                100% {
-                    transform: translateX(250%);
-                }
-            }
-            button {
-                align-self: flex-start;
-                -webkit-app-region: no-drag;
-                display: none;
-                padding: 7px 16px;
-                border: 1px solid #44403c;
-                border-radius: 8px;
-                background: transparent;
-                color: #f5f5f4;
-                font-size: 13px;
-                cursor: pointer;
-            }
-            button:hover {
-                background: #1c1917;
-            }
-            .error button {
-                display: block;
-            }
-            .error .bar {
-                display: none;
-            }
+            :root { color-scheme: dark; font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif; }
+            * { box-sizing: border-box; }
+            body { margin: 0; min-height: 100vh; padding: 28px; display: flex; align-items: center; justify-content: center; background: #11100f; color: #f5f5f4; -webkit-app-region: drag; user-select: none; }
+            main { width: 100%; max-width: 560px; max-height: calc(100vh - 40px); overflow: auto; -webkit-app-region: no-drag; }
+            h1 { margin: 0 0 8px; font-size: 22px; font-weight: 650; }
+            p { margin: 0; color: #aaa6a1; font-size: 13px; line-height: 1.65; }
+            .intro { margin-bottom: 22px; }
+            label { display: block; margin: 14px 0 6px; color: #d6d3d1; font-size: 12px; }
+            input[type="text"], input[type="password"] { width: 100%; height: 38px; padding: 0 11px; border: 1px solid #45413d; border-radius: 7px; background: #1b1917; color: #fafaf9; font: inherit; font-size: 13px; }
+            input:focus { outline: none; border-color: #fb923c; }
+            .row { display: flex; gap: 9px; margin-top: 14px; align-items: center; }
+            button { min-height: 36px; padding: 0 14px; border: 1px solid #45413d; border-radius: 7px; background: transparent; color: #f5f5f4; font: inherit; font-size: 13px; cursor: pointer; }
+            button:hover { background: #25221f; }
+            button:disabled { cursor: wait; opacity: .55; }
+            button.primary { border-color: #fb923c; background: #fb923c; color: #1c1917; font-weight: 600; }
+            button.primary:hover { background: #fdba74; }
+            .hint { margin-top: 7px; font-size: 11px; }
+            .error { margin-top: 12px; color: #fca5a5; font-size: 12px; white-space: pre-wrap; }
+            .state { display: none; margin-top: 18px; }
+            .state.visible { display: block; }
+            .notice { padding: 11px 12px; border-left: 2px solid #fb923c; background: #1b1917; color: #d6d3d1; font-size: 12px; line-height: 1.6; }
+            .model-head { display: flex; align-items: baseline; justify-content: space-between; margin: 18px 0 8px; }
+            .model-head strong { font-size: 13px; font-weight: 600; }
+            .models { max-height: 190px; overflow: auto; border-top: 1px solid #34302c; border-bottom: 1px solid #34302c; }
+            .model { display: grid; grid-template-columns: 18px minmax(0,1fr) auto auto; gap: 9px; align-items: center; min-height: 43px; border-bottom: 1px solid #292623; }
+            .model:last-child { border-bottom: 0; }
+            .model input { accent-color: #fb923c; }
+            .model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+            .model-meta { color: #8f8982; font-size: 10px; white-space: nowrap; }
+            .model-default { display: flex; align-items: center; gap: 5px; color: #bbb5ae; font-size: 11px; }
+            .model-default input { accent-color: #fb923c; }
+            .footer { justify-content: space-between; margin-top: 18px; }
+            .footer-note { max-width: 300px; font-size: 11px; }
+            #progress { display: none; align-items: center; gap: 8px; margin-top: 12px; color: #aaa6a1; font-size: 12px; }
+            #progress.visible { display: flex; }
+            .spinner { width: 13px; height: 13px; border: 2px solid #4b453f; border-top-color: #fb923c; border-radius: 50%; animation: spin .8s linear infinite; }
+            @keyframes spin { to { transform: rotate(360deg); } }
+            #startup { display: none; }
+            body.running #setup { display: none; }
+            body.running #startup { display: block; }
+            #retry { display: none; }
+            body.error #retry { display: inline-flex; }
+            body.error #progress { display: none; }
         </style>
     </head>
     <body>
-        <h1>无限画布</h1>
-        <p id="status">正在准备运行环境…</p>
-        <div class="bar"><span id="progress" class="indeterminate"></span></div>
-        <button id="retry" type="button">重试</button>
+        <main>
+            <section id="setup">
+                <h1>先连接你的 AI 渠道</h1>
+                <p class="intro">输入 C2A API Key，自动配置画布模型。新用户还可以为画布助手选择多个文本模型。</p>
+                <label for="base-url">C2A Base URL</label>
+                <input id="base-url" type="text" value="https://www.codex2api.com" spellcheck="false" autocomplete="url" />
+                <label for="api-key">API Key</label>
+                <input id="api-key" type="password" placeholder="粘贴 C2A API Key" autocomplete="off" spellcheck="false" />
+                <div class="row"><button id="load-models" class="primary" type="button">获取模型</button></div>
+                <div id="progress"><span class="spinner"></span><span id="progress-text">正在连接 C2A…</span></div>
+                <div id="error" class="error"></div>
+                <div id="models-state" class="state">
+                    <div id="existing-notice" class="notice" hidden>检测到本机已有 Codex 配置。完成后会保留现有助手配置，只设置画布渠道。</div>
+                    <div id="new-notice" class="notice" hidden>选择可用于画布助手的文本模型。模型元数据来自 models.dev，无法匹配时仍保留 C2A 模型。</div>
+                    <div id="model-section">
+                        <div class="model-head"><strong>助手文本模型</strong><span id="selected-count" class="model-meta">已选 0 个</span></div>
+                        <div id="models" class="models"></div>
+                        <p class="hint">所有勾选模型都会加入 Codex 的模型选择器，可稍后切换。默认模型用于新建对话。</p>
+                    </div>
+                    <div class="row footer">
+                        <p class="footer-note">助手凭据使用系统钥匙串；画布渠道按软件本地配置方式保存。</p>
+                        <button id="finish" class="primary" type="button">完成设置</button>
+                    </div>
+                </div>
+            </section>
+            <section id="startup">
+                <h1>Infinite Canvas</h1>
+                <p id="status" class="intro">正在准备运行环境…</p>
+                <div class="row"><button id="retry" type="button">重试启动</button></div>
+            </section>
+        </main>
         <script>
-            const labels = {
-                codex: "正在准备助手运行环境…",
-                proxy: "正在启动本地网络代理…",
-                agent: "正在启动画布助手…",
-                ready: "即将进入画布…",
-            };
-            const status = document.getElementById("status");
+            const body = document.body;
+            const baseUrl = document.getElementById("base-url");
+            const apiKey = document.getElementById("api-key");
+            const loadButton = document.getElementById("load-models");
+            const finishButton = document.getElementById("finish");
+            const error = document.getElementById("error");
             const progress = document.getElementById("progress");
-            const retry = document.getElementById("retry");
+            const progressText = document.getElementById("progress-text");
+            const modelList = document.getElementById("models");
+            const setupState = document.getElementById("models-state");
+            let loadedModels = [];
+            let loadedBaseUrl = "";
+            let loadedApiKey = "";
+            let existingCodex = false;
+            let canSetupCodex = false;
+            let onboardingReady = false;
+
+            function selectedModels() {
+                return [...modelList.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+            }
+
+            function updateCount() {
+                document.getElementById("selected-count").textContent = `已选 ${selectedModels().length} 个`;
+            }
+
+            function renderModels(models) {
+                modelList.replaceChildren();
+                // 与主进程一致：有元数据时只列出能确定上下文长度的模型；models.dev 不可用时全部列出。
+                const hasMetadata = models.some((model) => model.contextWindow !== undefined);
+                const textModels = models.filter((model) => model.capability === "text" && (!hasMetadata || model.contextWindow !== undefined));
+                canSetupCodex = !existingCodex && textModels.length > 0;
+                document.getElementById("model-section").hidden = existingCodex;
+                document.getElementById("existing-notice").hidden = !existingCodex;
+                document.getElementById("new-notice").hidden = existingCodex;
+                if (existingCodex) return;
+                for (const [index, model] of textModels.entries()) {
+                    const row = document.createElement("div");
+                    row.className = "model";
+                    const checkbox = document.createElement("input");
+                    checkbox.type = "checkbox";
+                    checkbox.value = model.id;
+                    checkbox.checked = index === 0;
+                    checkbox.setAttribute("aria-label", `将 ${model.id} 加入助手模型列表`);
+                    checkbox.addEventListener("change", () => {
+                        const radio = row.querySelector('input[type="radio"]');
+                        if (checkbox.checked && !modelList.querySelector('input[type="radio"]:checked')) radio.checked = true;
+                        if (!checkbox.checked && radio.checked) {
+                            radio.checked = false;
+                            const next = modelList.querySelector('input[type="checkbox"]:checked');
+                            if (next) next.closest(".model").querySelector('input[type="radio"]').checked = true;
+                        }
+                        updateCount();
+                    });
+                    const name = document.createElement("span");
+                    name.className = "model-name";
+                    name.textContent = model.name === model.id ? model.id : `${model.name} · ${model.id}`;
+                    const meta = document.createElement("span");
+                    meta.className = "model-meta";
+                    meta.textContent = model.contextWindow ? `${Math.round(model.contextWindow / 1000)}K context${model.contextInferred ? " · 推断" : ""}` : "C2A";
+                    const radioLabel = document.createElement("label");
+                    radioLabel.className = "model-default";
+                    const radio = document.createElement("input");
+                    radio.type = "radio";
+                    radio.name = "default-model";
+                    radio.value = model.id;
+                    radio.checked = index === 0;
+                    radio.setAttribute("aria-label", `将 ${model.id} 设为默认助手模型`);
+                    radio.addEventListener("change", () => { checkbox.checked = true; updateCount(); });
+                    radioLabel.append(radio, document.createTextNode("默认"));
+                    row.append(checkbox, name, meta, radioLabel);
+                    name.title = meta.text;
+                    modelList.append(row);
+                }
+                updateCount();
+            }
+
+            loadButton.addEventListener("click", async () => {
+                error.textContent = "";
+                if (!apiKey.value.trim()) { error.textContent = "请填写 C2A API Key。"; return; }
+                loadButton.disabled = true;
+                progress.classList.add("visible");
+                progressText.textContent = "正在读取 C2A 模型并补充模型信息…";
+                try {
+                    const result = await window.canvasDesktop.fetchOnboardingModels({ baseUrl: baseUrl.value, apiKey: apiKey.value });
+                    loadedModels = result.models;
+                    loadedBaseUrl = baseUrl.value.trim();
+                    loadedApiKey = apiKey.value.trim();
+                    existingCodex = result.existingCodex;
+                    onboardingReady = true;
+                    renderModels(loadedModels);
+                    if (!canSetupCodex) {
+                        document.getElementById("model-section").hidden = true;
+                        document.getElementById("new-notice").textContent = "该 Key 没有可用于助手的文本模型。仍可完成画布渠道配置，助手登录可稍后设置。";
+                    }
+                    setupState.classList.add("visible");
+                } catch (cause) {
+                    error.textContent = cause?.message || "读取模型失败，请检查 Base URL、Key 和网络连接。";
+                } finally {
+                    progress.classList.remove("visible");
+                    loadButton.disabled = false;
+                }
+            });
+
+            finishButton.addEventListener("click", async () => {
+                error.textContent = "";
+                if (!onboardingReady || loadedBaseUrl !== baseUrl.value.trim() || loadedApiKey !== apiKey.value.trim()) { error.textContent = "Base URL 或 Key 已更改，请重新获取模型。"; setupState.classList.remove("visible"); onboardingReady = false; return; }
+                const selected = canSetupCodex ? selectedModels() : [];
+                const defaultModel = canSetupCodex ? modelList.querySelector('input[type="radio"]:checked')?.value || "" : "";
+                if (canSetupCodex && !selected.length) { error.textContent = "请至少选择一个助手文本模型。"; return; }
+                if (canSetupCodex && !defaultModel) { error.textContent = "请指定默认助手模型。"; return; }
+                finishButton.disabled = true;
+                progress.classList.add("visible");
+                progressText.textContent = "正在安全保存配置…";
+                try {
+                    await window.canvasDesktop.saveOnboarding({ baseUrl: loadedBaseUrl, apiKey: loadedApiKey, models: loadedModels, selectedTextModels: selected, defaultTextModel: defaultModel, setupCodex: canSetupCodex });
+                    apiKey.value = "";
+                    progressText.textContent = "配置完成，正在启动…";
+                } catch (cause) {
+                    error.textContent = cause?.message || "保存失败，请重试。";
+                    progress.classList.remove("visible");
+                    finishButton.disabled = false;
+                }
+            });
 
             window.canvasDesktop.onBootstrapProgress((value) => {
-                if (value.phase === "error") {
-                    document.body.classList.add("error");
-                    status.textContent = value.message || "启动失败，请重试。";
+                if (value.phase === "onboarding") {
+                    body.classList.remove("running", "error");
+                    error.textContent = "";
+                    progress.classList.remove("visible");
+                    finishButton.disabled = false;
+                    onboardingReady = false;
+                    setupState.classList.remove("visible");
+                    existingCodex = value.existingCodex;
+                    canSetupCodex = Boolean(value.setupCodex);
+                    if (value.baseUrl) baseUrl.value = value.baseUrl;
                     return;
                 }
-                document.body.classList.remove("error");
-                status.textContent = labels[value.phase] || "正在准备运行环境…";
-                if (value.phase === "codex" && value.total > 0) {
-                    progress.classList.remove("indeterminate");
-                    progress.style.width = `${Math.min(100, Math.round((value.received / value.total) * 100))}%`;
-                } else if (value.phase === "ready") {
-                    progress.classList.remove("indeterminate");
-                    progress.style.width = "100%";
-                } else {
-                    progress.classList.add("indeterminate");
-                    progress.style.width = "";
+                if (value.phase === "error") {
+                    body.classList.add("running", "error");
+                    document.getElementById("status").textContent = value.message || "启动失败，请重试。";
+                    return;
+                }
+                if (value.phase === "onboarding-saved") {
+                    body.classList.add("running");
+                    document.getElementById("status").textContent = "配置已保存，正在启动画布…";
+                    return;
+                }
+                if (["codex", "proxy", "agent", "ready"].includes(value.phase)) {
+                    body.classList.add("running");
+                    body.classList.remove("error");
+                    document.getElementById("status").textContent = ({ codex: "正在准备助手运行环境…", proxy: "正在启动本地代理…", agent: "正在启动画布助手…", ready: "即将进入画布…" })[value.phase];
                 }
             });
 
-            retry.addEventListener("click", () => {
-                document.body.classList.remove("error");
-                status.textContent = "正在重新准备运行环境…";
-                progress.classList.add("indeterminate");
-                window.canvasDesktop.retryBootstrap();
-            });
+            document.getElementById("retry").addEventListener("click", () => window.canvasDesktop.retryBootstrap());
         </script>
     </body>
 </html>

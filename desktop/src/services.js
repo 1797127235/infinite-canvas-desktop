@@ -163,12 +163,12 @@ function log(text) {
 }
 
 /** 启动内置 Canvas Agent，并把下载好的 Codex 通过环境变量交给它。 */
-async function startAgent(codexBin, onProgress) {
+async function startAgent(codexBin, onProgress, env = {}) {
     const { agentEntry } = layout();
     if (!fs.existsSync(agentEntry)) throw new Error("安装包缺少 Canvas Agent 产物，请先执行 npm run resources");
     onProgress?.({ phase: "agent", received: 0, total: 0 });
     const port = await freePort();
-    spawnNode(agentEntry, { port, env: { CANVAS_CODEX_BIN: codexBin, NO_COLOR: "1" } });
+    spawnNode(agentEntry, { port, env: { CANVAS_CODEX_BIN: codexBin, NO_COLOR: "1", ...env } });
     await waitFor(`http://127.0.0.1:${port}/health`, 90_000);
     return port;
 }
@@ -194,10 +194,10 @@ function stopChildren() {
 }
 
 /** 直接执行 Codex 子命令，用于登录窗口；返回输出而不是打印到终端。 */
-function runCodex(args, { input, detached = false } = {}) {
+function runCodex(args, { input, detached = false, env = {} } = {}) {
     const binary = codexBinPath();
     if (!fs.existsSync(binary)) throw new Error("助手运行时尚未下载完成");
-    const child = spawn(binary, args, { windowsHide: true, detached, stdio: [input ? "pipe" : "ignore", "pipe", "pipe"] });
+    const child = spawn(binary, args, { windowsHide: true, detached, env: { ...process.env, ...env }, stdio: [input ? "pipe" : "ignore", "pipe", "pipe"] });
     if (input) {
         child.stdin.end(input);
     }

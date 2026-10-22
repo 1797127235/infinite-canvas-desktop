@@ -16,4 +16,7 @@ contextBridge.exposeInMainWorld("canvasDesktop", {
     codexStatus: () => ipcRenderer.invoke("codex:status"),
     codexLoginBrowser: () => ipcRenderer.invoke("codex:login-browser"),
     codexLoginApiKey: (apiKey) => ipcRenderer.invoke("codex:login-api-key", apiKey),
+    fetchOnboardingModels: (input) => ipcRenderer.invoke("onboarding:fetch-models", input),
+    saveOnboarding: (input) => ipcRenderer.invoke("onboarding:save", input),
+    readOnboarding: () => ipcRenderer.invoke("onboarding:read"),
 });

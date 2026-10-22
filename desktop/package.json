@@ -13,6 +13,7 @@
     "license": "MIT",
     "scripts": {
         "start": "electron .",
+        "test": "node --test src/*.test.js",
         "resources": "npm --prefix ../canvas-agent install --no-audit --no-fund && npm --prefix ../canvas-agent run build && npm --prefix ../canvas-agent install --omit=dev --no-audit --no-fund && npm --prefix ../web install --no-audit --no-fund && npm --prefix ../web run build",
         "dist": "electron-builder --win --linux",
         "dist:win": "electron-builder --win",

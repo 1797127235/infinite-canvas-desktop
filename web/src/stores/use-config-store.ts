@@ -411,6 +411,41 @@ export function modelOptionLabel(config: AiConfig, value: string) {
     return channel ? `${decoded.model}（${channel.name}）` : decoded.model;
 }
 
+export function applyOnboardingChannel(config: AiConfig, input: { baseUrl: string; apiKey: string; modelIds: string[]; defaultTextModel?: string }): AiConfig {
+    const builtin = BUILTIN_CHANNELS.find((channel) => normalizedBaseUrlKey(channel.baseUrl) === normalizedBaseUrlKey(input.baseUrl)) || C2A_CHANNEL;
+    const existing = config.channels.find((channel) => normalizedBaseUrlKey(channel.baseUrl) === normalizedBaseUrlKey(input.baseUrl));
+    const bundledModels = new Map(builtin.models.map((model) => [model.name, model]));
+    const models = Array.from(new Set(input.modelIds.map((id) => String(id).trim()).filter(Boolean))).map((name) => {
+        const bundled = bundledModels.get(name);
+        return bundled || { name, capability: guessCapability(name) };
+    });
+    const channel = createModelChannel({
+        ...(existing || builtin),
+        id: existing?.id || builtin.id,
+        name: existing?.name || builtin.name,
+        baseUrl: input.baseUrl.trim(),
+        apiKey: input.apiKey,
+        apiFormat: "openai",
+        models,
+    });
+    const channels = existing ? config.channels.map((item) => (item.id === existing.id ? channel : item)) : [...config.channels, channel];
+    const next = { ...config, channels, models: modelOptionsFromChannels(channels) };
+    const imageModel = pickOnboardingDefault(next, "image", config.imageModel, channel.id);
+    const videoModel = pickOnboardingDefault(next, "video", config.videoModel, channel.id);
+    const textModel =
+        input.defaultTextModel && models.some((model) => model.name === input.defaultTextModel && model.capability === "text") ? encodeChannelModel(channel.id, input.defaultTextModel) : pickOnboardingDefault(next, "text", config.textModel, channel.id);
+    const audioModel = pickOnboardingDefault(next, "audio", config.audioModel, channel.id);
+    return { ...next, model: textModel || imageModel || videoModel || audioModel || "", imageModel, videoModel, textModel, audioModel };
+}
+
+function pickOnboardingDefault(config: AiConfig, capability: ModelCapability, current: string, onboardingChannelId: string) {
+    const models = selectableModelsByCapability(config, capability);
+    const configured = config.channels.filter((channel) => channel.apiKey.trim()).flatMap((channel) => channel.models.filter((model) => model.capability === capability).map((model) => encodeChannelModel(channel.id, model.name)));
+    const available = configured.length ? configured : models.filter((value) => value.startsWith(`${onboardingChannelId}::`));
+    const normalized = normalizeModelOptionValue(current, config.channels);
+    return available.includes(normalized) ? normalized : available[0] || "";
+}
+
 export function modelOptionsFromChannels(channels: ModelChannel[]) {
     return uniqueModelOptions(channels.flatMap((channel) => channel.models.map((model) => encodeChannelModel(channel.id, model.name))));
 }
@@ -461,6 +496,12 @@ function builtinChannelOf(channel: ModelChannel) {
     return BUILTIN_CHANNELS.find((builtin) => normalizedBaseUrlKey(builtin.baseUrl) === normalizedBaseUrlKey(channel.baseUrl));
 }
 
+/** 旧版回退分支会留下「默认渠道」这类通用名字，内置渠道认出来后换成真实名称；用户自己改过的名字不动。 */
+function builtinChannelName(channel: ModelChannel, builtin: ModelChannel, index: number) {
+    const generic = ["", i18n.t("config.channels.defaultName"), i18n.t("config.channels.indexedName", { index: index + 1 })];
+    return generic.includes(channel.name.trim()) ? builtin.name : channel.name;
+}
+
 function updateBuiltinChannelModels(models: ChannelModel[], builtin: ModelChannel) {
     const merged = models.map((model) => {
         const match = builtin.models.find((item) => item.name === model.name);
@@ -471,12 +512,6 @@ function updateBuiltinChannelModels(models: ChannelModel[], builtin: ModelChanne
         if (!merged.some((model) => model.name === item.name)) merged.push({ name: item.name, capability: item.capability, script: item.script });
     }
     return merged;
-}
-
-/** 旧版回退分支会留下「默认渠道」这类通用名字，内置渠道认出来后换成真实名称；用户自己改过的名字不动。 */
-function builtinChannelName(channel: ModelChannel, builtin: ModelChannel, index: number) {
-    const generic = ["", i18n.t("config.channels.defaultName"), i18n.t("config.channels.indexedName", { index: index + 1 })];
-    return generic.includes(channel.name.trim()) ? builtin.name : channel.name;
 }
 
 export function normalizeChannels(config: AiConfig) {

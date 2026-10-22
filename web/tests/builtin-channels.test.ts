@@ -17,13 +17,48 @@ afterAll(() => {
     else Reflect.deleteProperty(globalThis, "localStorage");
 });
 
-const { defaultConfig, normalizeChannels } = await import("../src/stores/use-config-store");
+const { applyOnboardingChannel, defaultConfig, normalizeChannels } = await import("../src/stores/use-config-store");
 const { AGNES_CHANNEL } = await import("../src/constant/agnes-channel");
 const { C2A_CHANNEL } = await import("../src/constant/c2a-channel");
 
 const baseUrls = (channels: { baseUrl: string }[]) => channels.map((channel) => channel.baseUrl);
 const scriptCount = (models: { script?: string }[]) => models.filter((model) => model.script?.trim()).length;
 const withChannels = (channels: unknown[]): AiConfig => ({ ...defaultConfig, channels }) as AiConfig;
+
+test("onboarding replaces all C2A-visible models and keeps bundled scripts and other channels", () => {
+    const custom = { id: "custom", name: "Custom", baseUrl: "https://custom.example", apiKey: "custom-key", apiFormat: "openai" as const, models: [{ name: "custom-model", capability: "text" as const }] };
+    const config = { ...defaultConfig, channels: [{ ...C2A_CHANNEL, apiKey: "old-key" }, custom] } as AiConfig;
+    const next = applyOnboardingChannel(config, {
+        baseUrl: C2A_CHANNEL.baseUrl,
+        apiKey: "new-key",
+        modelIds: ["grok-4.7", "new-text", "MiniMax-H3"],
+    });
+    const c2a = next.channels.find((channel) => channel.id === C2A_CHANNEL.id)!;
+    expect(c2a.apiKey).toBe("new-key");
+    expect(c2a.models.map((model) => model.name)).toEqual(["grok-4.7", "new-text", "MiniMax-H3"]);
+    expect(c2a.models.find((model) => model.name === "MiniMax-H3")?.script).toBeTruthy();
+    expect(next.channels.find((channel) => channel.id === "custom")?.apiKey).toBe("custom-key");
+    expect(next.models).toContain(`${C2A_CHANNEL.id}::new-text`);
+});
+
+test("onboarding uses the selected assistant text model as the canvas text default", () => {
+    const next = applyOnboardingChannel(defaultConfig, { baseUrl: C2A_CHANNEL.baseUrl, apiKey: "c2a-key", modelIds: ["coding-a", "coding-b"], defaultTextModel: "coding-b" });
+    expect(next.textModel).toBe(`${C2A_CHANNEL.id}::coding-b`);
+    expect(next.model).toBe(`${C2A_CHANNEL.id}::coding-b`);
+});
+
+test("onboarding never assigns a model of another capability when a channel has none", () => {
+    const next = applyOnboardingChannel(defaultConfig, { baseUrl: C2A_CHANNEL.baseUrl, apiKey: "c2a-key", modelIds: ["text-model"] });
+    expect(next.audioModel).toBe("");
+});
+
+test("onboarding adds a C2A channel without replacing Agnes credentials", () => {
+    const config = { ...defaultConfig, channels: [{ ...AGNES_CHANNEL, apiKey: "agnes-key" }] } as AiConfig;
+    const next = applyOnboardingChannel(config, { baseUrl: C2A_CHANNEL.baseUrl, apiKey: "c2a-key", modelIds: ["agnes-image-2.5-flash", "text-model"] });
+    expect(next.imageModel).toBe(`${AGNES_CHANNEL.id}::agnes-image-2.5-flash`);
+    expect(next.channels.find((channel) => channel.baseUrl === AGNES_CHANNEL.baseUrl)?.apiKey).toBe("agnes-key");
+    expect(next.channels.find((channel) => channel.baseUrl === C2A_CHANNEL.baseUrl)?.apiKey).toBe("c2a-key");
+});
 
 test("默认配置同时内置 Agnes 与 C2A", () => {
     expect(baseUrls(defaultConfig.channels)).toEqual([AGNES_CHANNEL.baseUrl, C2A_CHANNEL.baseUrl]);

@@ -1,11 +1,15 @@
 const path = require("node:path");
-const { app, BrowserWindow, Menu, ipcMain, shell } = require("electron");
+const fs = require("node:fs");
+const os = require("node:os");
+const { execFileSync } = require("node:child_process");
+const { app, BrowserWindow, Menu, ipcMain, safeStorage, shell } = require("electron");
 
 const { ensureCodex, log, runCodex, startAgent, startProxy, stopChildren } = require("./services");
+const { fetchAvailableModels, hasExistingCodexConfig, normalizeOpenAIBaseUrl } = require("./onboarding");
+const { channelSetupForRenderer, readSetup, saveSetup, setupCodexDecision } = require("./onboarding-store");
 const { AGENT_PREFIX, startWebServer } = require("./server");
 
 const preload = path.join(__dirname, "preload.js");
-const AGENT_START_TIMEOUT_MS = 90_000;
 const CODEX_LOGIN_TIMEOUT_MS = 300_000;
 
 let splash = null;
@@ -13,7 +17,10 @@ let mainWindow = null;
 let accountWindow = null;
 let agentPort = 0;
 let webPort = 0;
-let injected = { agentUrl: "", proxyUrl: "" };
+let injected = { agentUrl: "", proxyUrl: "", onboarding: null };
+let finishOnboarding = null;
+let onboardingSetupCodex = false;
+let runtimeCodexEnv = {};
 let booting = null;
 let lastProgress = { phase: "codex" };
 
@@ -22,10 +29,29 @@ function sendProgress(value) {
     if (splash && !splash.isDestroyed()) splash.webContents.send("bootstrap:progress", value);
 }
 
+/** 只在系统里找 Codex 可执行文件；配置文件是否存在交给 hasExistingCodexConfig 统一判断。 */
+function detectCodexExecutable() {
+    const candidates = process.platform === "win32" ? ["codex.exe", "codex.cmd"] : ["codex"];
+    for (const binary of candidates) {
+        try {
+            execFileSync(process.platform === "win32" ? "where" : "which", [binary], { stdio: "ignore" });
+            return true;
+        } catch {}
+    }
+    const userPaths = process.platform === "win32"
+        ? [path.join(process.env.LOCALAPPDATA || "", "Programs", "Codex", "codex.exe")]
+        : process.platform === "darwin"
+          ? ["/Applications/Codex.app/Contents/Resources/codex", path.join(os.homedir(), "Applications/Codex.app/Contents/Resources/codex")]
+          : ["/usr/bin/codex", "/usr/local/bin/codex", path.join(os.homedir(), ".local", "bin", "codex")];
+    return userPaths.some((candidate) => candidate && fs.existsSync(candidate));
+}
+
 function createSplash() {
     splash = new BrowserWindow({
-        width: 440,
-        height: 300,
+        width: 560,
+        height: 700,
+        minWidth: 520,
+        minHeight: 560,
         frame: false,
         resizable: false,
         show: false,
@@ -38,12 +64,27 @@ function createSplash() {
     splash.loadFile(path.join(__dirname, "splash.html"));
 }
 
-/** 桌面壳启动顺序：Codex 运行时 → 本地代理 → Canvas Agent → 同源网页服务。 */
+/** 新用户先完成一次配置，再启动 Codex 运行时与画布服务。 */
 async function bootstrap() {
+    const userDataPath = app.getPath("userData");
+    let setup = readSetup(userDataPath, safeStorage);
+    if (!setup) {
+        const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+        const existingCodex = hasExistingCodexConfig({
+            configTomlExists: fs.existsSync(path.join(codexHome, "config.toml")),
+            authJsonExists: fs.existsSync(path.join(codexHome, "auth.json")),
+            codexExecutableExists: detectCodexExecutable(),
+        });
+        onboardingSetupCodex = setupCodexDecision(existingCodex);
+        sendProgress({ phase: "onboarding", existingCodex, setupCodex: onboardingSetupCodex, baseUrl: "https://www.codex2api.com" });
+        setup = await new Promise((resolve) => { finishOnboarding = resolve; });
+        finishOnboarding = null;
+    }
     sendProgress({ phase: "codex", received: 0, total: 0 });
     const codexBin = await ensureCodex(sendProgress);
     const proxyPort = await startProxy(sendProgress);
-    agentPort = await startAgent(codexBin, sendProgress);
+    runtimeCodexEnv = setup.useManagedCodexHome ? { CODEX_HOME: path.join(userDataPath, "codex-home"), CANVAS_C2A_API_KEY: setup.apiKey } : {};
+    agentPort = await startAgent(codexBin, sendProgress, runtimeCodexEnv);
     webPort = await startWebServer(() => agentPort);
     injected = { agentUrl: `http://127.0.0.1:${webPort}${AGENT_PREFIX}`, proxyUrl: `http://127.0.0.1:${proxyPort}` };
     log(`services ready: web=${webPort} agent=${agentPort} proxy=${proxyPort}`);
@@ -129,7 +170,7 @@ function runCodexCommand(args, options = {}) {
         let child;
         let output;
         try {
-            ({ child, output } = runCodex(args, options));
+            ({ child, output } = runCodex(args, { ...options, env: { ...runtimeCodexEnv, ...options.env } }));
         } catch (error) {
             return void finish({ ok: false, text: error.message });
         }
@@ -143,8 +184,45 @@ function registerIpc() {
         event.returnValue = injected;
     });
     ipcMain.handle("bootstrap:retry", async () => {
+        if (finishOnboarding) {
+            const setup = readSetup(app.getPath("userData"), safeStorage);
+            if (!setup) {
+                sendProgress({ phase: "onboarding", existingCodex: !onboardingSetupCodex, setupCodex: onboardingSetupCodex, baseUrl: "https://www.codex2api.com" });
+                return;
+            }
+            const resolve = finishOnboarding;
+            finishOnboarding = null;
+            resolve(setup);
+            return;
+        }
         stopChildren();
+        booting = null;
         return void (await openApp());
+    });
+    ipcMain.handle("onboarding:fetch-models", async (event, input) => {
+        if (event.sender !== splash?.webContents) throw new Error("只允许桌面配置向导读取模型");
+        const baseUrl = normalizeOpenAIBaseUrl(input?.baseUrl);
+        const apiKey = String(input?.apiKey || "").trim();
+        if (!apiKey) throw new Error("请填写 C2A API Key。");
+        return { models: await fetchAvailableModels({ baseUrl, apiKey }), existingCodex: !onboardingSetupCodex };
+    });
+    ipcMain.handle("onboarding:save", (event, input) => {
+        if (event.sender !== splash?.webContents) throw new Error("只允许桌面配置向导保存配置");
+        const baseUrl = normalizeOpenAIBaseUrl(input?.baseUrl);
+        const apiKey = String(input?.apiKey || "").trim();
+        const models = Array.isArray(input?.models) ? input.models : [];
+        const selectedTextModels = Array.isArray(input?.selectedTextModels) ? input.selectedTextModels.map(String) : [];
+        const defaultTextModel = String(input?.defaultTextModel || "");
+        const saved = saveSetup({ userDataPath: app.getPath("userData"), safeStorage, baseUrl, apiKey, models, selectedTextModels, defaultTextModel, setupCodex: onboardingSetupCodex });
+        const setup = readSetup(app.getPath("userData"), safeStorage);
+        if (finishOnboarding) finishOnboarding(setup);
+        sendProgress({ phase: "onboarding-saved" });
+        return saved;
+    });
+    ipcMain.handle("onboarding:read", (event) => {
+        if (event.sender !== mainWindow?.webContents) throw new Error("只允许画布页面读取配置");
+        const setup = readSetup(app.getPath("userData"), safeStorage);
+        return channelSetupForRenderer(setup);
     });
     ipcMain.handle("codex:status", () => runCodexCommand(["login", "status"]));
     ipcMain.handle("codex:login-api-key", (_event, apiKey) => {

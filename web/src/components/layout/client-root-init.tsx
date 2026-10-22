@@ -3,17 +3,36 @@ import { useEffect, useRef } from "react";
 import { App } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { useConfigStore } from "@/stores/use-config-store";
+import { applyOnboardingChannel, useConfigStore } from "@/stores/use-config-store";
+import { isDesktopShell } from "@/constant/desktop-shell";
 import { usePromptSourceScheduler } from "@/hooks/use-prompt-source-scheduler";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
     const { t } = useTranslation();
     const handledConfigParams = useRef(false);
+    const onboardingLoaded = useRef(false);
     const importChannelCredentials = useConfigStore((state) => state.importChannelCredentials);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
 
     usePromptSourceScheduler();
+
+    useEffect(() => {
+        if (!isDesktopShell || onboardingLoaded.current || !window.canvasDesktop?.readOnboarding) return;
+        onboardingLoaded.current = true;
+        void window.canvasDesktop
+            .readOnboarding()
+            .then((setup) => {
+                if (!setup || window.localStorage.getItem("infinite-canvas:desktop-c2a-onboarding") === setup.setupId) return;
+                const store = useConfigStore.getState();
+                const config = applyOnboardingChannel(store.config, setup);
+                useConfigStore.setState({ config });
+                window.localStorage.setItem("infinite-canvas:desktop-c2a-onboarding", setup.setupId);
+            })
+            .catch((error) => {
+                message.error(error instanceof Error ? error.message : "读取 C2A 初始化配置失败");
+            });
+    }, [message]);
 
     useEffect(() => {
         if (handledConfigParams.current) return;
