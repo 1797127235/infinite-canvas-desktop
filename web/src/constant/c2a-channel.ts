@@ -1,6 +1,7 @@
 import grokVideoScript from "@/constant/c2a/grok-video.js?raw";
 import h3Script from "@/constant/c2a/minimax-h3.js?raw";
 import h3MaxScript from "@/constant/c2a/minimax-h3-max.js?raw";
+import wan3Script from "@/constant/c2a/wan3-video.js?raw";
 
 /** 内置默认渠道：脚本随仓库维护，用户只需要填 API Key。 */
 export const C2A_CHANNEL = {
@@ -17,5 +18,7 @@ export const C2A_CHANNEL = {
         { name: "grok-imagine-video-1.5-preview", capability: "video" as const, script: grokVideoScript },
         { name: "MiniMax-H3", capability: "video" as const, script: h3Script },
         { name: "MiniMax-H3-Max", capability: "video" as const, script: h3MaxScript },
+        { name: "wan3.0-video", capability: "video" as const, script: wan3Script },
+        { name: "wan3.0-video-prime", capability: "video" as const, script: wan3Script },
     ],
 };

@@ -64,8 +64,8 @@ test("默认配置同时内置 Agnes 与 C2A", () => {
     expect(baseUrls(defaultConfig.channels)).toEqual([AGNES_CHANNEL.baseUrl, C2A_CHANNEL.baseUrl]);
     const c2a = defaultConfig.channels.find((channel) => channel.id === C2A_CHANNEL.id);
     expect(c2a?.models.map((model) => model.name)).toEqual(C2A_CHANNEL.models.map((model) => model.name));
-    // Grok 视频两个 + MiniMax-H3 + H3-Max，共 4 个模型带内置脚本。
-    expect(scriptCount(c2a?.models ?? [])).toBe(4);
+    // Grok 视频两个 + MiniMax-H3 + H3-Max + 万相 3.0 两个，共 6 个模型带内置脚本。
+    expect(scriptCount(c2a?.models ?? [])).toBe(6);
 });
 
 test("全新安装（本地无配置）会得到两个内置渠道", () => {
@@ -87,7 +87,7 @@ test("只保存了 C2A 时补齐 Agnes，C2A 的 Key 与模型保持不变并刷
     expect(channels[0].apiKey).toBe("sk-c2a");
     // 缺失的内置模型补回来，脚本也补齐。
     expect(channels[0].models.length).toBe(C2A_CHANNEL.models.length);
-    expect(scriptCount(channels[0].models)).toBe(4);
+    expect(scriptCount(channels[0].models)).toBe(6);
 });
 
 test("用户自建的第三方渠道原样保留，内置渠道追加在后", () => {
@@ -102,7 +102,7 @@ test("旧版保存的 C2A 渠道脚本丢失时会被内置脚本刷新", () => 
     const stale = { ...C2A_CHANNEL, models: C2A_CHANNEL.models.map((model) => ({ name: model.name, capability: model.capability, script: "" })) };
     const channels = normalizeChannels(withChannels([AGNES_CHANNEL, stale]));
     const c2a = channels.find((channel) => channel.baseUrl === C2A_CHANNEL.baseUrl);
-    expect(scriptCount(c2a?.models ?? [])).toBe(4);
+    expect(scriptCount(c2a?.models ?? [])).toBe(6);
 });
 
 test("不会重复追加内置渠道", () => {
