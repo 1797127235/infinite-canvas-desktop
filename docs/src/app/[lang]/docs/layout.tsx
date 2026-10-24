@@ -7,7 +7,7 @@ export default async function Layout({ params, children }: LayoutProps<'/[lang]/
   const { lang } = await params;
 
   return (
-    <DocsLayout {...baseOptions(lang)} tree={source.getPageTree(lang)} sidebar={{ banner: <DocsSidebarTabs key="docs-sections" /> }} tabs={false}>
+    <DocsLayout {...baseOptions()} tree={source.getPageTree(lang)} sidebar={{ banner: <DocsSidebarTabs key="docs-sections" /> }} tabs={false}>
       <DocsTopTabs />
       {children}
     </DocsLayout>

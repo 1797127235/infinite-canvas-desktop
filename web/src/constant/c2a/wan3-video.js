@@ -14,6 +14,39 @@ function checkDimensions(width, height, max, label) {
         throw new Error(`${label}单边须为 240–${max} px，宽高比不超过 8:1`);
     }
 }
+function loadImage(url) {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("浏览器无法解码图片，请转成 JPG、PNG 或 WEBP 后重试"));
+        image.src = url;
+    });
+}
+// 官方单边 [240, 8000] px；实测低于 240 会在任务创建后的校验阶段失败，所以提交前先放大/缩小。
+const MIN_SIDE = 240;
+const MAX_SIDE = 8000;
+async function normalizeImage(url) {
+    const image = await loadImage(url);
+    const width = image.naturalWidth;
+    const height = image.naturalHeight;
+    const longest = Math.max(width, height);
+    const shortest = Math.min(width, height);
+    let scale = 1;
+    if (longest > MAX_SIDE) scale = MAX_SIDE / longest;
+    else if (shortest < MIN_SIDE) scale = MIN_SIDE / shortest;
+    if (scale === 1) return url;
+    const normalizedWidth = Math.round(width * scale);
+    const normalizedHeight = Math.round(height * scale);
+    if (Math.min(normalizedWidth, normalizedHeight) < MIN_SIDE || Math.max(normalizedWidth, normalizedHeight) > MAX_SIDE) {
+        throw new Error(`图片 ${width}×${height} 缩放后仍超出 240–8000 px，宽高比过于极端，请先裁剪再试`);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = normalizedWidth;
+    canvas.height = normalizedHeight;
+    canvas.getContext("2d").drawImage(image, 0, 0, normalizedWidth, normalizedHeight);
+    // 万相不支持透明通道，原图是 BMP/PNG 也统一转 JPEG，同时避免放大后体积越界。
+    return canvas.toDataURL("image/jpeg", 0.92);
+}
 function dataUrlBytes(url) {
     const comma = url.indexOf(",");
     if (comma < 0) throw new Error("素材必须是 Base64 Data URL");
@@ -102,7 +135,10 @@ if (!Number.isInteger(requested) || requested < 2 || requested > 30) throw new E
 const frames = params.mode !== "reference" && images.length <= 2 && !videos.length && !audios.length;
 if (frames && images.length > 2) throw new Error("首尾帧模式最多 2 张图");
 if (!frames && images.length > 10) throw new Error("参考图片最多 10 张");
-for (const image of images) await validateImage(image);
+for (let index = 0; index < images.length; index++) {
+    images[index] = await normalizeImage(images[index]);
+    await validateImage(images[index]);
+}
 const mediaSeconds = videos.length || audios.length ? (await validateMedia(videos, "video")) + (await validateMedia(audios, "audio")) : 0;
 // 有视频/音频输入时：输入总时长 + 输出时长 ≤ 30 秒。单段 ≤15 秒，所以上限恒 ≥15。
 // 策略：静默压到上限（不弹错），用户选的 30 秒与「输入 5 + 输出 25」在账面一致。

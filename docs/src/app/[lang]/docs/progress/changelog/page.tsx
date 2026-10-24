@@ -7,32 +7,21 @@ import { join } from 'node:path';
 import type { Metadata } from 'next';
 import { getMDXComponents } from '@/components/mdx';
 
-const messages = {
-  en: {
-    title: 'Changelog',
-    description: 'Project release history',
-    content: '# Changelog\n\nThe detailed changelog is currently maintained in Chinese. See the [source changelog](https://github.com/basketikun/infinite-canvas/blob/main/CHANGELOG.md) for all releases.',
-  },
-  'zh-CN': {
-    title: '更新日志',
-    description: '项目版本变更记录',
-  },
-};
+const title = '更新日志';
+const description = '项目版本变更记录';
 
 async function readChangelog() {
   return readFile(join(process.cwd(), '..', 'CHANGELOG.md'), 'utf8');
 }
 
-export default async function ChangelogPage({ params }: PageProps<'/[lang]/docs/progress/changelog'>) {
-  const { lang } = await params;
-  const text = messages[lang as keyof typeof messages];
-  const changelog = lang === 'zh-CN' ? await readChangelog() : messages.en.content;
+export default async function ChangelogPage() {
+  const changelog = await readChangelog();
   const toc = getTableOfContents(changelog);
 
   return (
     <DocsPage toc={toc} tableOfContent={{ style: 'clerk' }}>
-      <DocsTitle>{text.title}</DocsTitle>
-      <DocsDescription>{text.description}</DocsDescription>
+      <DocsTitle>{title}</DocsTitle>
+      <DocsDescription>{description}</DocsDescription>
       <DocsBody>
         <Markdown components={getMDXComponents()} remarkPlugins={[remarkHeading]}>
           {changelog}
@@ -42,12 +31,6 @@ export default async function ChangelogPage({ params }: PageProps<'/[lang]/docs/
   );
 }
 
-export async function generateMetadata({ params }: PageProps<'/[lang]/docs/progress/changelog'>): Promise<Metadata> {
-  const { lang } = await params;
-  const text = messages[lang as keyof typeof messages];
-
-  return {
-    title: text.title,
-    description: text.description,
-  };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title, description };
 }

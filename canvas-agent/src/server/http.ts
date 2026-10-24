@@ -31,6 +31,7 @@ export function startHttpServer() {
     saveConfig(config);
 
     const initialWorkspace = ensureSiteWorkspace(config);
+    const allowedOrigins = readAllowedOrigins();
     const session = new CanvasSession(initialWorkspace.activeThreadId || "");
     const skillStore = new SkillStore(initialWorkspace.workspacePath);
     /** 将 Agent 事件广播到所属线程或全部网页。 */
@@ -55,7 +56,8 @@ export function startHttpServer() {
             ...(sourceClientId ? { sourceClientId } : {}),
         };
         session.trackCodexEvent(type, data);
-        threadId ? session.emitThread(type, threadId, data) : session.emitAll(type, data);
+        if (threadId) session.emitThread(type, threadId, data);
+        else session.emitAll(type, data);
     };
     /** 保存并广播当前站点工作空间的活跃线程。 */
     const setActiveThread = (activeThreadId: string, payload: Record<string, unknown> = {}, preserveConversation = false) => {
@@ -124,7 +126,7 @@ export function startHttpServer() {
         next();
     });
     app.use((req, res, next) => {
-        setCors(res);
+        setCors(req, res, allowedOrigins);
         if (req.method === "OPTIONS") return void res.json({});
         next();
     });
@@ -208,6 +210,7 @@ export function startHttpServer() {
             }
             const snapshot = session.canvasStateForClient(clientId);
             if (!snapshot || (snapshot as Record<string, unknown>).hasCanvas === false) return res.status(409).json({ ok: false, error: "当前页面没有可提炼的画布" });
+            if (!snapshot.nodes?.length) return res.status(409).json({ ok: false, error: "当前画布没有可提炼的节点" });
             session.setCodexState({ busy: true, threadId: workspace.activeThreadId || "", turnId: "" }, { preserveReplay: true });
             const data = await generateCodexSkillDraft(emit, workspace.workspacePath, { source, snapshot, model, effort });
             if (!session.hasClient(clientId)) return res.status(409).json({ ok: false, error: "发起提炼的网页已断开，请重新连接后再试" });
@@ -444,7 +447,7 @@ export function startHttpServer() {
         if (selfEntry) console.log(`Optional MCP add: codex mcp add infinite-canvas -- ${selfEntry}`);
         console.log("Remove manually added MCP: codex mcp remove infinite-canvas");
         if (logger.enabled) console.log(`Debug log: ${logger.filePath}`);
-        logger.info("Canvas Agent started", { url: config.url, workspace: ensureSiteWorkspace(config).workspacePath, debugLog: logger.filePath });
+        logger.info("Canvas Agent started", { url: config.url, workspace: ensureSiteWorkspace(config).workspacePath, allowedOrigins: allowedOrigins ? allowedOrigins.join(",") : "*", debugLog: logger.filePath });
         const activeThreadId = initialWorkspace.activeThreadId || "";
         if (activeThreadId && session.beginCodexMutation()) {
             void prepareExistingThread(activeThreadId).catch(async (error) => {
@@ -521,12 +524,27 @@ function requestUrl(req: Request, config: CanvasAgentConfig) {
     return new URL(req.originalUrl || req.url || "/", config.url);
 }
 
-/** 设置跨域响应头。仅监听 127.0.0.1，不做来源与凭证校验。 */
-function setCors(res: Response) {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+/** 桌面版由主进程注入允许的网页来源；未设置时（网页版）保持放行任意来源。 */
+function readAllowedOrigins() {
+    const origins = (process.env.CANVAS_AGENT_ALLOWED_ORIGINS || "").split(",").map((item) => item.trim()).filter(Boolean);
+    return origins.length ? origins : null;
+}
+
+/** 决定是否给当前请求下发跨域头：未配置白名单时放行，配置后只认白名单来源。 */
+export function corsOrigin(origin: string, allowed: string[] | null) {
+    if (!allowed) return "*";
+    return origin && allowed.includes(origin) ? origin : "";
+}
+
+/** 设置跨域响应头。仅监听 127.0.0.1；本机非浏览器请求不带 Origin，不需要跨域头。 */
+function setCors(req: Request, res: Response, allowed: string[] | null) {
+    const allowOrigin = corsOrigin(String(req.headers.origin || ""), allowed);
+    if (!allowOrigin) return;
+    res.setHeader("Access-Control-Allow-Origin", allowOrigin);
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
     res.setHeader("Access-Control-Allow-Private-Network", "true");
+    if (allowOrigin !== "*") res.setHeader("Vary", "Origin");
 }
 
 /** 向 Agent 提示词追加本轮图片附件引用说明。 */

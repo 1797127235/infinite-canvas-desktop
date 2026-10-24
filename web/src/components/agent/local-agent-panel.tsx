@@ -235,6 +235,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     const clientIdRef = useRef("");
     const [clientReady, setClientReady] = useState(false);
     const loadThreadsSequenceRef = useRef(0);
+    const loadThreadsCallRef = useRef(0);
     const threadMessagesRef = useRef(new Map<string, AgentChatItem[]>());
     const authoritativeHistoryTurnsRef = useRef(new Set<string>());
     const liveTurnKeysRef = useRef(new Set<string>());
@@ -343,6 +344,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
     const loadThreads = useCallback(
         async (skipHistory = false, expectedTurnId = "") => {
             if (!connectedRef.current && !useAgentStore.getState().connected) return;
+            const call = ++loadThreadsCallRef.current;
             let sequence = ++loadThreadsSequenceRef.current;
             setAgentState({ loadingThreads: true });
             try {
@@ -366,7 +368,8 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             } catch (error) {
                 addEventLog(rt("historyReadFailed"), error);
             } finally {
-                if (sequence === loadThreadsSequenceRef.current && !threadOperationRef.current) setAgentState({ loadingThreads: false });
+                // 切换会话会让旧 sequence 失效，但 loadingThreads 必须由最后一次加载自己清掉，否则发送按钮会永久禁用。
+                if (call === loadThreadsCallRef.current && !threadOperationRef.current) setAgentState({ loadingThreads: false });
             }
         },
         [applyConversationState, applyWorkspaceChange, endpoint, loadThreadSnapshot, setAgentState, token],

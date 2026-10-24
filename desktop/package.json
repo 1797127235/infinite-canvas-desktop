@@ -14,7 +14,7 @@
     "scripts": {
         "start": "electron .",
         "test": "node --test src/*.test.js",
-        "resources": "npm --prefix ../canvas-agent install --no-audit --no-fund && npm --prefix ../canvas-agent run build && npm --prefix ../canvas-agent prune --omit=dev --no-audit --no-fund && npm --prefix ../web install --no-audit --no-fund && npm --prefix ../web run build",
+        "resources": "npm --prefix ../canvas-agent install --no-audit --no-fund && npm --prefix ../canvas-agent run build && npm --prefix ../canvas-agent prune --omit=dev --no-audit --no-fund && bun install --cwd ../web && bun run --cwd ../web build",
         "dist": "electron-builder --win --linux",
         "dist:win": "electron-builder --win",
         "dist:linux": "electron-builder --linux"

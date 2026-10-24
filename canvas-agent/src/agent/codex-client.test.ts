@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { CodexAppClient } from "./codex-client.js";
-import { assertDraftHasNoSensitiveValues, canvasSkillSource } from "./codex.js";
+import { assertDraftHasNoSensitiveValues, canvasSkillSource, draftSkillName, parseSkillDraftOutput } from "./codex.js";
 
 type TestClient = {
     currentThreadId: string;
@@ -930,6 +930,53 @@ test("app-server 退出时等待失败历史落盘后再结束 turn", async () =
     assert.equal(settled, true);
     assert.equal(events.some((event) => event.type === "agent_event" && eventType(event.payload) === "turn.completed"), true);
     assert.equal(events.some((event) => event.type === "agent_done"), true);
+});
+
+test("Skill 草稿解析容忍代码围栏、BOM 和前后说明文字", () => {
+    const value = { name: "product-image-flow", displayName: "商品图流程" };
+    const body = JSON.stringify(value, null, 2);
+
+    assert.deepEqual(parseSkillDraftOutput(JSON.stringify(value)), value);
+    assert.deepEqual(parseSkillDraftOutput(`\uFEFF${JSON.stringify(value)}`), value);
+    assert.deepEqual(parseSkillDraftOutput(`\`\`\`json\n${body}\n\`\`\``), value);
+    assert.deepEqual(parseSkillDraftOutput(`\`\`\`\n${body}\n\`\`\``), value);
+    assert.deepEqual(parseSkillDraftOutput(`已按流程提炼：\n\`\`\`json\n${body}\n\`\`\`\n请确认后再保存。`), value);
+    assert.deepEqual(parseSkillDraftOutput(`结果如下 ${JSON.stringify(value)} 完成`), value);
+});
+
+test("Skill 草稿解析对真正无结构的内容返回 undefined", () => {
+    assert.equal(parseSkillDraftOutput("当前画布没有可提炼的流程"), undefined);
+    assert.equal(parseSkillDraftOutput(""), undefined);
+    assert.equal(parseSkillDraftOutput("```\n画布太简单了\n```"), undefined);
+    assert.equal(parseSkillDraftOutput("[1, 2, 3]"), undefined);
+});
+
+test("Skill 草稿脱敏断言不把普通斜杠文案误判为本地路径", () => {
+    const draft = (instructions: string) => ({ name: "canvas-image-flow", displayName: "画布生图流程", description: "从画布节点提炼可复用的生图流程", instructions, shortDescription: "", defaultPrompt: "" });
+
+    assert.doesNotThrow(() => assertDraftHasNoSensitiveValues(draft("先设置分辨率 1k / 2k / 4k，再选择比例 16:9 / 3:4"), []));
+    assert.doesNotThrow(() => assertDraftHasNoSensitiveValues(draft("用 /image 工作台生成图片，或用 /video 创作台出视频"), []));
+    assert.doesNotThrow(() => assertDraftHasNoSensitiveValues(draft("生图 / 视频 两条流程分开处理"), []));
+    assert.doesNotThrow(() => assertDraftHasNoSensitiveValues(draft("清晰度 480p / 720p / 1080p，时长 4-30 秒"), []));
+});
+
+test("Skill 草稿脱敏断言仍然拦下真实本地路径与凭证", () => {
+    const draft = (instructions: string) => ({ name: "canvas-image-flow", displayName: "画布生图流程", description: "从画布节点提炼可复用的生图流程", instructions, shortDescription: "", defaultPrompt: "" });
+    const blocked = /本地路径/;
+
+    assert.throws(() => assertDraftHasNoSensitiveValues(draft("读取 /home/liu/.config/app.json"), []), blocked);
+    assert.throws(() => assertDraftHasNoSensitiveValues(draft("把结果写到 /tmp/out/result.png"), []), blocked);
+    assert.throws(() => assertDraftHasNoSensitiveValues(draft("打开 file:///etc/passwd"), []), blocked);
+    assert.throws(() => assertDraftHasNoSensitiveValues(draft("复制 C:\\Users\\liu\\config.toml"), []), blocked);
+});
+
+test("Skill 草稿名称归一为合法 slug", () => {
+    assert.equal(draftSkillName("product-image-flow"), "product-image-flow");
+    assert.equal(draftSkillName("Product Image Flow"), "product-image-flow");
+    assert.equal(draftSkillName("商品图_流程"), "canvas-skill");
+    assert.equal(draftSkillName("  --Canvas__Flow--  "), "canvas-flow");
+    assert.equal(draftSkillName(""), "canvas-skill");
+    assert.ok(draftSkillName("a".repeat(80)).length <= 64);
 });
 
 function eventScope(payload: unknown) {

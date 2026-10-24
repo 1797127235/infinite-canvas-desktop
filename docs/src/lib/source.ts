@@ -13,11 +13,10 @@ export const source = loader({
 
 export function getPageMarkdownUrl(page: (typeof source)['$inferPage']) {
   const segments = [...page.slugs, 'content.md'];
-  const locale = page.locale === i18n.defaultLanguage ? '' : `?locale=${page.locale}`;
 
   return {
     segments,
-    url: `${docsContentRoute}/${segments.join('/')}${locale}`,
+    url: `${docsContentRoute}/${segments.join('/')}`,
   };
 }
 

@@ -18,16 +18,24 @@ type CodexRunOptions = { threadId?: string; cwd?: string; permissionMode?: Agent
 type CodexSkillDraftInput = { model?: string; effort?: CodexReasoningEffort } & ({ source: "conversation"; threadId: string } | { source: "canvas"; snapshot: CanvasSnapshot });
 
 const skillNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/**
+ * 草稿只校验结构：名称格式、简短描述长度、$name 提到等格式约束在保存时由 SkillStore 再校验一次，
+ * 草稿还会回填到可编辑表单，这里卡死只会把正确内容整份丢弃。
+ */
 const skillDraftSchema = z.object({
-    name: z.string().trim().min(1).max(64).regex(skillNamePattern),
+    name: z.string().trim().min(1).max(64),
     displayName: z.string().trim().max(64),
-    description: z.string().trim().min(1).max(1024).refine((value) => !/[<>]/.test(value)),
+    description: z.string().trim().min(1).max(1024),
     instructions: z.string().trim().min(1).max(20000),
-    shortDescription: z.string().trim().max(64).refine((value) => !value || value.length >= 25),
+    shortDescription: z.string().trim().max(64),
     defaultPrompt: z.string().trim().max(1024),
-}).strict().superRefine((draft, context) => {
-    if (draft.defaultPrompt && !mentionsSkill(draft.defaultPrompt, draft.name)) context.addIssue({ code: "custom", path: ["defaultPrompt"], message: `默认提示词必须包含 $${draft.name}` });
 });
+
+/** 将草稿名称归一为合法 slug，避免回填后保存时因名称格式失败。 */
+export function draftSkillName(value: string) {
+    const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64).replace(/-+$/, "");
+    return skillNamePattern.test(slug) ? slug : "canvas-skill";
+}
 
 const SKILL_DRAFT_OUTPUT_SCHEMA: JsonRecord = {
     type: "object",
@@ -318,16 +326,19 @@ async function generateCodexSkillDraftNow(emit: AgentEmit, cwd: string, input: C
         const thread = input.source === "conversation" ? await app.forkSkillDraftThread(input.threadId, cwd) : await app.startSkillDraftThread(cwd);
         threadId = String(field(thread, "id") || "");
         const raw = await app.generateSkillDraft(threadId, skillDraftPrompt(input), SKILL_DRAFT_OUTPUT_SCHEMA, input.model, input.effort);
-        let value: unknown;
-        try {
-            value = JSON.parse(raw);
-        } catch {
+        const value = parseSkillDraftOutput(raw);
+        if (value === undefined) {
+            logger.warn("Skill draft output is not JSON", { length: raw.length, preview: draftOutputPreview(raw) });
             throw new Error("助手返回的 Skill 草稿不是有效 JSON");
         }
         const parsed = skillDraftSchema.safeParse(value);
-        if (!parsed.success) throw new Error("助手返回的 Skill 草稿格式不正确");
-        assertDraftHasNoSensitiveValues(parsed.data, input.source === "canvas" ? canvasPrivateValues(input.snapshot) : []);
-        return parsed.data;
+        if (!parsed.success) {
+            logger.warn("Skill draft output does not match schema", { issues: parsed.error.issues.map((issue) => `${issue.path.join(".") || "-"}: ${issue.message}`), preview: draftOutputPreview(raw) });
+            throw new Error("助手返回的 Skill 草稿格式不正确");
+        }
+        const draft = { ...parsed.data, name: draftSkillName(parsed.data.name) };
+        assertDraftHasNoSensitiveValues(draft, input.source === "canvas" ? canvasPrivateValues(input.snapshot) : []);
+        return draft;
     } finally {
         if (threadId) await app.closeSkillDraftThread(threadId).catch((error) => logger.warn("Failed to release Skill draft thread", { threadId, error }));
     }
@@ -377,7 +388,10 @@ export function canvasSkillSource(snapshot: CanvasSnapshot): JsonRecord {
         const summary = { ref: `node-${index + 1}`, type: node.type, ...(nodeTitle ? { title: nodeTitle } : {}) };
         const candidate = { ...summary, ...(cleanMetadata && Object.keys(cleanMetadata as JsonRecord).length ? { metadata: cleanMetadata } : {}) };
         if (canvasSourceFits({ ...source, nodes: [...source.nodes, candidate] }, MAX_CANVAS_SKILL_NODE_CHARS)) source.nodes.push(candidate);
-        else if (canvasSourceFits({ ...source, nodes: [...source.nodes, summary] }, MAX_CANVAS_SKILL_NODE_CHARS)) (source.nodes.push(summary), truncated = true);
+        else if (canvasSourceFits({ ...source, nodes: [...source.nodes, summary] }, MAX_CANVAS_SKILL_NODE_CHARS)) {
+            source.nodes.push(summary);
+            truncated = true;
+        }
         else truncated = true;
     });
     const includedRefs = new Set(source.nodes.map((node) => String(node.ref || "")));
@@ -481,18 +495,44 @@ function patternMatches(pattern: RegExp, text: string) {
     return pattern.test(text);
 }
 
-function mentionsSkill(prompt: string, name: string) {
-    return new RegExp(`\\$${name}(?![A-Za-z0-9_-]|:[A-Za-z0-9_-])`).test(prompt);
-}
-
 export function assertDraftHasNoSensitiveValues(draft: AgentSkillDraft, privateValues: string[]) {
     const text = Object.values(draft).join("\n");
-    const localPath = /(?:^|[\s`'"“”（(\[{,:;：])(?:file:(?:\/\/)?|[a-z]:[\\/]|\\\\|\/(?!\/))/im;
+    // 斜杠必须构成两段以上路径才算本地路径；"1k / 2k / 4k"、"/image 工作台" 这类正常文案不能误判。
+    const localPath = /(?:^|[\s`'"“”（(\[{,:;：])(?:file:(?:\/\/)?|[a-z]:[\\/]|\\\\|\/(?!\/)(?:[^\s/`'"“”<>]+\/)+)/im;
     const externalUrl = (text.match(webUrl) || []).length > 0;
     const hasPrivateValue = privateValues.some((value) => text.includes(value));
     if (localPath.test(text) || /\b(?:data:|blob:)/i.test(text) || patternMatches(credentialAssignment, text) || patternMatches(bearerToken, text) || patternMatches(jwtToken, text) || patternMatches(knownApiToken, text) || patternMatches(transientIdentifier, text) || externalUrl || hasPrivateValue) {
         throw new Error("生成的 Skill 草稿包含外部地址、本地路径、敏感凭证或一次性标识，已拒绝返回");
     }
+}
+
+/** 从助手输出中解析 JSON：容忍 BOM、代码围栏和前后说明文字。 */
+export function parseSkillDraftOutput(raw: string): JsonRecord | undefined {
+    const text = raw.replace(/^\uFEFF/, "").trim();
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    return [text, ...fenceBodies(text), start >= 0 && end > start ? text.slice(start, end + 1) : ""].map(parseJsonRecord).find((value) => value !== undefined);
+}
+
+/** 只接受 JSON 对象，数组和普通文本一律视为无效。 */
+function parseJsonRecord(text: string): JsonRecord | undefined {
+    if (!text) return undefined;
+    try {
+        const value: unknown = JSON.parse(text);
+        return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : undefined;
+    } catch (error) {
+        logger.debug("Skill draft candidate is not JSON", { length: text.length, error: errorMessage(error) });
+        return undefined;
+    }
+}
+
+function fenceBodies(text: string) {
+    return [...text.matchAll(/```[a-zA-Z]*\s*\n?([\s\S]*?)```/g)].map((match) => match[1].trim());
+}
+
+/** 记录失败原文便于下次定位，凭证按现有规则替换。 */
+function draftOutputPreview(raw: string) {
+    return raw.slice(0, 400).replace(credentialAssignment, "[凭证已移除]").replace(bearerToken, "[凭证已移除]").replace(jwtToken, "[凭证已移除]").replace(knownApiToken, "[凭证已移除]");
 }
 
 /** 读取线程历史，并显式标记 Codex 是否已经物化 turns。 */

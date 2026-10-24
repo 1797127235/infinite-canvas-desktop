@@ -1,10 +1,10 @@
 # TODO
 
-待办事项。功能测试确认后移入文档站的[待测试](/zh-CN/docs/progress/pending-test)，确认通过后再写进[功能介绍](/zh-CN/docs/overview/features)。
+待办事项。功能测试确认后移入文档站的[待测试](/docs/progress/pending-test)，确认通过后再写进[功能介绍](/docs/overview/features)。
 
 ## 本地 Agent 与 Skill
 
-- 本地 Agent 接入后续：按[本地 Agent 接入规划](/zh-CN/docs/progress/local-agent-integration-plan)把 Claude Code CLI Adapter 升级为 Claude Agent SDK Adapter，并完善工具队列体验。
+- 本地 Agent 接入后续：把 Claude Code CLI Adapter 升级为 Claude Agent SDK Adapter，并完善工具队列体验。
 - Agent Skill 后续：补充网络检索安装、Skill 资源文件管理和可控的本地记忆沉淀。
 
 ## 更新能力
@@ -46,4 +46,4 @@
 
 ## 文档
 
-- `pending-test.zh-CN.mdx` 中关于 Canvas Agent 启动时检查 npm 更新的描述与现状不符，`canvas-agent/src/version-check.ts` 已明确不查询 npm，只往日志输出本地版本。
+- `canvas-agent/README.md` 仍写着「网页第一次带正确 token 连接后记录 Origin，其他 Origin 不能复用」，但 `cb8bc29` 已移除 token 与来源白名单。桌面版现在通过 `CANVAS_AGENT_ALLOWED_ORIGINS` 限定为固定网页端口，网页版（`npx canvas-agent`）仍不设该变量、CORS 固定 `*`。需要决定网页版怎么处理（多域名部署的 origin 白名单方案，或恢复鉴权），并把 README 改成与现状一致。

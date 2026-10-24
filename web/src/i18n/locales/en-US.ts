@@ -1204,6 +1204,7 @@ export default {
             codexBusy: "Assistant is running. Finish the current task before extracting a Skill.",
             noConversation: "This conversation has no completed content to extract",
             noCanvas: "There is no canvas on this page to extract",
+            emptyCanvas: "This canvas has no nodes yet. Add some nodes before generating a draft.",
             connecting: "This page is still connecting to the Agent. Try again shortly.",
             syncFailed: "Failed to sync the current canvas. Check the Agent connection and try again.",
             noDraft: "No Skill draft was generated",

@@ -62,7 +62,10 @@ async function fetchAvailableModels({ baseUrl, apiKey, fetchImpl = fetch }) {
     try {
         const metadataResponse = await fetchImpl("https://models.dev/api.json");
         if (metadataResponse.ok) metadata = await metadataResponse.json();
-    } catch {}
+        else console.warn(`模型能力元数据获取失败（HTTP ${metadataResponse.status}），本次按纯文本模型处理`);
+    } catch (cause) {
+        console.warn(`模型能力元数据获取失败，本次按纯文本模型处理：${cause?.message || cause}`);
+    }
     const maps = modelsDevProviderMap(metadata);
     return enrichVisibleModels(ids, maps.catalog, maps.aliases);
 }
@@ -157,6 +160,13 @@ function filterSelectedModels(models, selectedIds) {
     return hasMetadata ? picked.filter((model) => model.contextWindow !== undefined) : picked;
 }
 
+/** 只保留 Codex catalog 接受的输入模态；过滤后为空说明元数据不可靠，退回纯文本。 */
+const CODEX_MODALITIES = new Set(["text", "image", "audio"]);
+function codexModalities(modalities) {
+    const kept = Array.isArray(modalities) ? modalities.filter((modality) => CODEX_MODALITIES.has(modality)) : [];
+    return kept.length ? kept : ["text"];
+}
+
 function buildCodexModelCatalog(models) {
     if (!models.length) throw new Error("至少选择一个文本模型");
     return {
@@ -182,7 +192,9 @@ function buildCodexModelCatalog(models) {
             supports_parallel_tool_calls: model.toolCall === true,
             experimental_supported_tools: [],
             ...(model.contextWindow ? { context_window: model.contextWindow } : {}),
-            input_modalities: ["text"],
+            // Codex 用这个字段决定是否开放 view_image 等图片能力；它只认 text/image/audio，
+            // models.dev 里还有 pdf 等其它取值，直接透传会让整个 catalog 解析失败。
+            input_modalities: codexModalities(model.inputModalities),
         })),
     };
 }

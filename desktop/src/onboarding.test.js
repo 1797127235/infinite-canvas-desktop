@@ -68,21 +68,35 @@ test("uses models.dev output modalities to keep non-text models out of the Codex
     assert.deepEqual(filterSelectedModels([imageModel, textModel], [imageModel.id, textModel.id]).map((model) => model.id), [textModel.id]);
 });
 
-test("builds a valid Codex model catalog with model-specific limits and text-only modalities", () => {
+test("keeps the input modalities models.dev reports instead of forcing text-only", () => {
     const catalog = buildCodexModelCatalog([
-        { id: "coding-a", name: "Coding A", contextWindow: 128000, maxOutputTokens: 8000, inputModalities: ["text"], reasoning: true, capability: "text" },
+        { id: "coding-a", name: "Coding A", contextWindow: 128000, maxOutputTokens: 8000, inputModalities: ["text", "image"], reasoning: true, capability: "text" },
         { id: "coding-b", name: "Coding B", contextWindow: 64000, maxOutputTokens: 4000, inputModalities: ["text"], reasoning: false, capability: "text" },
     ]);
 
     assert.equal(catalog.models.length, 2);
     assert.deepEqual(catalog.models.map((model) => model.slug), ["coding-a", "coding-b"]);
     assert.deepEqual(catalog.models.map((model) => model.context_window), [128000, 64000]);
-    assert.deepEqual(catalog.models.map((model) => model.input_modalities), [["text"], ["text"]]);
+    assert.deepEqual(catalog.models.map((model) => model.input_modalities), [["text", "image"], ["text"]]);
     for (const model of catalog.models) {
         assert.ok(model.supported_reasoning_levels.length > 0);
         assert.ok("truncation_policy" in model);
         assert.ok("supports_parallel_tool_calls" in model);
     }
+});
+
+test("drops modalities Codex rejects so the whole catalog still parses", () => {
+    // models.dev 会给出 pdf / video，而 Codex 的枚举只有 text / image / audio，
+    // 原样透传会让整个 model_catalog_json 解析失败、助手直接无法启动。
+    const [model] = buildCodexModelCatalog([{ id: "grok-4.7", name: "Grok 4.7", inputModalities: ["text", "image", "pdf"], capability: "text" }]).models;
+
+    assert.deepEqual(model.input_modalities, ["text", "image"]);
+});
+
+test("falls back to text-only modalities when metadata is missing", () => {
+    const [model] = buildCodexModelCatalog([{ id: "coding-a", name: "Coding A", capability: "text" }]).models;
+
+    assert.deepEqual(model.input_modalities, ["text"]);
 });
 
 test("configures selected models on a Responses provider without embedding credentials", () => {

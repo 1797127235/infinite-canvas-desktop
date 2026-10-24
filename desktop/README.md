@@ -27,7 +27,7 @@ npm run resources   # 构建 web/dist 与 canvas-agent/dist，并只留生产依
 npm start
 ```
 
-`npm run resources` 会依次执行 canvas-agent 的安装与构建、裁剪 devDependencies、以及网页构建。产物缺失时桌面壳会直接报错并提示执行它。
+`npm run resources` 会依次执行 canvas-agent 的安装与构建、裁剪 devDependencies、以及网页构建。网页部分用 bun 安装与构建（`antd 6` 与 `@ant-design/pro-components` 的 peer 声明冲突，npm 会直接 ERESOLVE），需要先装好 bun。产物缺失时桌面壳会直接报错并提示执行它。
 
 ## 打包
 

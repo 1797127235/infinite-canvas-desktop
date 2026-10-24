@@ -1,62 +1,62 @@
 ---
-title: Packaging as a Windows Desktop App (Electron)
-description: Wrap Infinite Canvas and Canvas Agent into a Windows installer that students open with a double click and configure only through Codex config.toml
+title: 打包成 Windows 桌面程序（Electron）
+description: 把无限画布与 Canvas Agent 打成 Windows 安装包，学员双击即用，只需配置 Codex 的 config.toml
 ---
 
-# Packaging as a Windows Desktop App (Electron)
+# 打包成 Windows 桌面程序（Electron）
 
-This page explains how to package this repository as a Windows desktop app. The target shape: a student receives an installer, double clicks it, and gets a standalone application window. No Node, no Codex CLI, no connection address to fill in.
+本文说明如何把本仓库打包成 Windows 桌面程序。目标形态：学员拿到安装包，双击打开就是一个独立应用窗口，不需要 Node，不需要 Codex CLI，也不需要填写任何连接地址。
 
-## 1. Runtime model
+## 1. 打包后的运行模型
 
 ```txt
-InfiniteCanvas.exe (Electron main process)
-  ├─ spawns Canvas Agent as a child process via ELECTRON_RUN_AS_NODE → 127.0.0.1:17371
-  │     └─ Canvas Agent then spawns its bundled Codex app-server (stdio)
-  └─ BrowserWindow loads the web frontend (custom protocol)
+InfiniteCanvas.exe（Electron 主进程）
+  ├─ 以 ELECTRON_RUN_AS_NODE 拉起 Canvas Agent 子进程 → 127.0.0.1:17371
+  │     └─ Canvas Agent 再拉起自带的 Codex app-server（stdio）
+  └─ BrowserWindow 加载 Web 前端（自定义协议）
 ```
 
-Three prerequisites are already satisfied by the code:
+代码里已经具备三个前提：
 
-- Canvas Agent listens on `127.0.0.1` only, with no token and no origin check, so the client can connect as soon as the child process is up
-- The frontend connects to `http://127.0.0.1:17371` by default, and also accepts an injected `window.__CANVAS_AGENT__ = { url }`
-- `@openai/codex` is a dependency of canvas-agent and ships with the package, so students never install the Codex CLI
+- Canvas Agent 只监听 `127.0.0.1`，没有 token；桌面版通过 `CANVAS_AGENT_ALLOWED_ORIGINS` 只放行自己的网页来源，子进程起来即可连接
+- 前端默认连 `http://127.0.0.1:17371`，也接受外壳注入 `window.__CANVAS_AGENT__ = { url }`
+- `@openai/codex` 是 canvas-agent 的依赖，随包分发，学员不需要安装 Codex CLI
 
-## 2. Build artifacts
+## 2. 构建产物
 
-Two artifacts are required before packaging:
+打包前需要两样产物：
 
 ```bash
-# Frontend
+# 前端
 cd web && bun install && bun run build      # → web/dist
 
-# Agent: npm install runs tsc automatically through the prepare script
+# Agent：npm install 会通过 prepare 自动执行 tsc
 cd canvas-agent && npm install              # → canvas-agent/dist
 ```
 
-The frontend must be installed with bun. `npm install` fails outright on the `@ant-design/pro-components` peer dependency.
+前端必须用 bun 安装依赖，`npm install` 会在 `@ant-design/pro-components` 的 peer 依赖上直接失败。
 
-## 3. Directory layout
+## 3. 目录布局
 
-Files inside an Electron `asar` archive cannot be executed as child processes, so the Agent has to live outside the archive:
+Electron 的 `asar` 归档内的文件不能直接作为子进程执行，所以 Agent 必须放在 asar 之外：
 
 ```txt
-install dir/
+安装目录/
   InfiniteCanvas.exe
   resources/
-    app.asar              ← main process code + web-dist
-    agent/                ← the whole canvas-agent package (outside asar)
+    app.asar              ← 主进程代码 + web-dist
+    agent/                ← canvas-agent 整体（在 asar 外）
       dist/
-      node_modules/       ← includes @openai/codex and its platform binary
+      node_modules/       ← 含 @openai/codex 与平台二进制
       package.json
       agent-instructions.md
 ```
 
-Copy it wholesale into `resources/agent` with `extraResources`; do not rely on `asarUnpack` alone.
+用 `extraResources` 整体拷进 `resources/agent`，不要只靠 `asarUnpack`。
 
-## 4. Installing dependencies for Windows (the easiest thing to miss)
+## 4. Windows 上的依赖安装（最容易被忽略）
 
-The platform binary for `@openai/codex` comes from `optionalDependencies`, and npm installs only the one for **the current platform**:
+`@openai/codex` 的平台二进制来自 `optionalDependencies`，npm 只安装**当前平台**的那一个：
 
 ```txt
 @openai/codex-linux-x64   @openai/codex-linux-arm64
@@ -64,26 +64,26 @@ The platform binary for `@openai/codex` comes from `optionalDependencies`, and n
 @openai/codex-win32-x64   @openai/codex-win32-arm64
 ```
 
-Running `npm install` on Linux yields `linux-x64`. Shipped inside a Windows package, the Codex app-server exits immediately, which surfaces as "Codex conversation failed to initialize".
+在 Linux 上执行 `npm install` 拿到的是 `linux-x64`，装进 Windows 包后 Codex app-server 会立即退出，表现为"Codex 对话初始化失败"。
 
-So run `canvas-agent/npm install` on a Windows machine or a Windows CI runner. If cross-packaging is unavoidable, install the platform package explicitly:
+因此必须在 Windows 机器或 Windows CI runner 上执行 `canvas-agent/npm install`。确实需要交叉打包时，显式补装：
 
 ```bash
 npm install --prefix canvas-agent --no-save \
   @openai/codex-win32-x64@npm:@openai/codex@0.146.0-win32-x64
 ```
 
-The version must match `@openai/codex` in `canvas-agent/package.json`. After packaging, verify this directory exists:
+版本号必须与 `canvas-agent/package.json` 中 `@openai/codex` 的版本一致。打包后务必确认这个目录存在：
 
 ```txt
 resources/agent/node_modules/@openai/codex-win32-x64/
 ```
 
-## 5. Load the frontend through a custom protocol, not file://
+## 5. 前端用自定义协议加载，不要用 file://
 
-The frontend uses `createBrowserRouter` (history routing). When loaded over `file://`, navigating to `/canvas/xxx` turns into a request for a file that does not exist, so deep links and page reloads render a blank screen.
+前端使用 `createBrowserRouter`（History 路由）。用 `file://` 加载时，跳到 `/canvas/xxx` 会变成访问一个不存在的文件，深链接和刷新都会白屏。
 
-Register a privileged protocol that maps `app://` to `web-dist` and falls back to `index.html`:
+正确做法是注册一个特权协议，把 `app://` 映射到 `web-dist`，路径不存在时回落到 `index.html`：
 
 ```js
 // desktop/main.js
@@ -104,9 +104,9 @@ function serveWeb() {
   protocol.handle("app", (request) => {
     const { pathname } = new URL(request.url);
     let filePath = path.join(WEB_ROOT, decodeURIComponent(pathname));
-    // Block directory traversal
+    // 防目录穿越
     if (!filePath.startsWith(WEB_ROOT)) return new Response("", { status: 403 });
-    // Directory or missing file → SPA fallback
+    // 目录或文件不存在 → SPA 回落
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
       filePath = path.join(WEB_ROOT, "index.html");
     }
@@ -115,9 +115,9 @@ function serveWeb() {
 }
 ```
 
-Leave `VITE_BASE` at its default of `/`; it does not need to become `./`.
+`VITE_BASE` 保持默认 `/`，不需要改成 `./`。
 
-## 6. Start the Agent and wait for readiness
+## 6. 拉起 Agent 并等待就绪
 
 ```js
 const { spawn } = require("node:child_process");
@@ -130,11 +130,11 @@ function startAgent() {
   agentProcess = spawn(process.execPath, [entry], {
     env: {
       ...process.env,
-      ELECTRON_RUN_AS_NODE: "1", // Reuse Electron's bundled Node; students install nothing
+      ELECTRON_RUN_AS_NODE: "1", // 用 Electron 自带的 Node，学员无需安装 Node
       PORT: String(AGENT_PORT),
     },
     stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true, // No console window flash
+    windowsHide: true, // 不弹出黑框
   });
   agentProcess.stdout.on("data", (chunk) => console.log("[agent]", String(chunk).trim()));
   agentProcess.stderr.on("data", (chunk) => console.error("[agent]", String(chunk).trim()));
@@ -165,9 +165,9 @@ async function waitForAgent(timeoutMs = 30000) {
 }
 ```
 
-On first launch the Agent writes `%USERPROFILE%\.infinite-canvas\canvas-agent.json`, which is slower than subsequent launches. A 30 second timeout is sufficient.
+Agent 首次启动会写入 `%USERPROFILE%\.infinite-canvas\canvas-agent.json`，比后续启动慢，30 秒超时足够。
 
-## 7. Create the window
+## 7. 创建窗口
 
 ```js
 async function createWindow() {
@@ -191,18 +191,18 @@ app.whenReady().then(async () => {
   startAgent();
   const ready = await waitForAgent();
   if (!ready) {
-    // Show the window anyway; otherwise the student sees "nothing happened".
-    // Prefer rendering an in-window message pointing at the log directory.
+    // 失败也要开窗口，否则学员看到的是"什么都没发生"
+    // 建议在窗口内提示：Agent 启动失败，并给出日志目录
   }
   await createWindow();
 });
 ```
 
-The Agent fails to start when the port is already taken. If several instances may run on one machine, enforce a single instance with `app.requestSingleInstanceLock()` rather than switching ports dynamically.
+端口被占用时 Agent 会启动失败。如果同一台机器可能开多份，用 `app.requestSingleInstanceLock()` 保证单实例，比动态换端口省事。
 
-## 8. Injecting the Agent address (usually unnecessary)
+## 8. 注入 Agent 地址（多数情况不需要）
 
-The frontend connects to `http://127.0.0.1:17371` by default; injection is only needed when the port changes. A preload script runs before page scripts:
+前端默认就连 `http://127.0.0.1:17371`，只有改过端口才需要注入。用 preload，可在页面脚本之前生效：
 
 ```js
 // desktop/preload.js
@@ -213,9 +213,9 @@ contextBridge.exposeInMainWorld("__CANVAS_AGENT__", {
 });
 ```
 
-## 9. Reap the child process on exit (mandatory on Windows)
+## 9. 退出时回收子进程（Windows 必做）
 
-The Agent itself spawns the Codex app-server. Killing only the Agent process on Windows leaves an orphaned `codex.exe` behind, which holds the port and breaks the next launch. Kill the whole process tree:
+Agent 自己还会拉起 Codex app-server。在 Windows 上只结束 Agent 进程会留下孤儿 `codex.exe`，下次启动端口被占、行为异常。必须按进程树结束：
 
 ```js
 const { execFileSync } = require("node:child_process");
@@ -238,13 +238,13 @@ app.on("before-quit", stopAgent);
 app.on("window-all-closed", () => app.quit());
 ```
 
-## 10. Packaging configuration
+## 10. 打包配置
 
-`desktop/electron-builder.yml`:
+`desktop/electron-builder.yml`：
 
 ```yaml
 appId: com.yourorg.infinitecanvas
-productName: Infinite Canvas
+productName: 无限画布
 directories:
   output: release
   buildResources: build
@@ -267,16 +267,16 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  shortcutName: Infinite Canvas
+  shortcutName: 无限画布
 ```
 
-Lay out the artifacts before building:
+构建前把产物摆到位：
 
 ```txt
 desktop/
   main.js
   preload.js
-  web-dist/            ← copied from web/dist
+  web-dist/            ← 复制自 web/dist
   electron-builder.yml
 ```
 
@@ -286,19 +286,19 @@ npm install --save-dev electron electron-builder
 npx electron-builder --win
 ```
 
-## 11. Acceptance checklist
+## 11. 验收清单
 
-- [ ] The app starts on a machine without Node installed
-- [ ] The Agent starts on a machine without the Codex CLI (using the bundled Codex)
-- [ ] `resources/agent/node_modules/@openai/codex-win32-x64/` exists
-- [ ] First launch creates `%USERPROFILE%\.infinite-canvas\canvas-agent.json`
-- [ ] The panel connects on open, with no address or token to enter
-- [ ] Reloading the page and opening `/canvas/<id>` directly both render correctly
-- [ ] After quitting, no `InfiniteCanvas.exe` or `codex.exe` remains in Task Manager
-- [ ] Editing only `%USERPROFILE%\.codex\config.toml` changes the model list
+- [ ] 目标机没装 Node，程序能启动
+- [ ] 目标机没装 Codex CLI，Agent 能起来（使用随包的 Codex）
+- [ ] `resources/agent/node_modules/@openai/codex-win32-x64/` 存在
+- [ ] 首次启动自动生成 `%USERPROFILE%\.infinite-canvas\canvas-agent.json`
+- [ ] 面板打开即连上，不需要填地址或 token
+- [ ] 刷新页面、直接进入 `/canvas/<id>` 不白屏
+- [ ] 退出程序后任务管理器里没有残留 `InfiniteCanvas.exe` 与 `codex.exe`
+- [ ] 只改 `%USERPROFILE%\.codex\config.toml`，模型列表随之变化
 
-## 12. Two Windows specifics
+## 12. 两个 Windows 细节
 
-**SmartScreen**: an unsigned installer triggers "Windows protected your PC". Either buy a code signing certificate or tell students up front to click "More info → Run anyway".
+**SmartScreen**：未签名的安装包会提示"Windows 已保护你的电脑"。要么购买代码签名证书，要么在培训时统一说明点击"更多信息 → 仍要运行"。
 
-**Antivirus false positives**: Electron plus a Node child process plus a bundled Codex binary tends to trip heuristics. Code signing measurably helps.
+**杀毒误报**：Electron 加 Node 子进程再加打包的 Codex 二进制，容易触发启发式误报。代码签名能显著改善。

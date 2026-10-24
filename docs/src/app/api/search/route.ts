@@ -6,9 +6,6 @@ export const revalidate = false;
 
 export const { staticGET: GET } = createFromSource(source, {
   localeMap: {
-    en: {
-      language: 'english',
-    },
     'zh-CN': {
       components: {
         tokenizer: createDocsSearchTokenizer(),

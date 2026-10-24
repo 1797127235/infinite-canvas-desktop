@@ -7,6 +7,10 @@ const { app } = require("electron");
 const tar = require("tar");
 
 const { codexVersion, layout } = require("./paths");
+const { WEB_PORT } = require("./server");
+
+// 桌面版网页从固定端口加载，只允许它自己跨域访问内置 Agent；网页版不设置该变量，保持原有放行。
+const ALLOWED_ORIGINS = [`http://127.0.0.1:${WEB_PORT}`, `http://localhost:${WEB_PORT}`].join(",");
 
 /** 只覆盖当前支持的 Windows / Linux 平台；三平台之外直接报错而不是静默失败。 */
 const CODEX_TARGETS = {
@@ -168,7 +172,7 @@ async function startAgent(codexBin, onProgress, env = {}) {
     if (!fs.existsSync(agentEntry)) throw new Error("安装包缺少 Canvas Agent 产物，请先执行 npm run resources");
     onProgress?.({ phase: "agent", received: 0, total: 0 });
     const port = await freePort();
-    spawnNode(agentEntry, { port, env: { CANVAS_CODEX_BIN: codexBin, NO_COLOR: "1", ...env } });
+    spawnNode(agentEntry, { port, env: { CANVAS_CODEX_BIN: codexBin, NO_COLOR: "1", CANVAS_AGENT_ALLOWED_ORIGINS: ALLOWED_ORIGINS, ...env } });
     await waitFor(`http://127.0.0.1:${port}/health`, 90_000);
     return port;
 }

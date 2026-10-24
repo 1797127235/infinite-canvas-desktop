@@ -8,8 +8,8 @@ const config = {
   reactStrictMode: true,
   async rewrites() {
     return [
-      { source: '/', destination: '/en' },
-      { source: '/docs/:path*', destination: '/en/docs/:path*' },
+      { source: '/', destination: '/zh-CN' },
+      { source: '/docs/:path*', destination: '/zh-CN/docs/:path*' },
     ];
   },
 };

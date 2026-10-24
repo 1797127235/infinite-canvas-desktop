@@ -58,12 +58,44 @@ async function generateVideo({ prompt, images, videos, audios, params: { seconds
         });
     }
 
+    function loadImage(url) {
+        return new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = () => reject(new Error("浏览器无法解码参考图片，请转成 JPG、PNG 或 WEBP 后重试"));
+            image.src = url;
+        });
+    }
+
+    // 服务端硬限制：参考图单边须为 256–5760 px，超出时先本地等比缩放，不把尺寸问题抛给用户。
+    async function normalizeImage(url) {
+        const image = await loadImage(url);
+        const width = image.naturalWidth;
+        const height = image.naturalHeight;
+        const longest = Math.max(width, height);
+        const shortest = Math.min(width, height);
+        let scale = 1;
+        if (longest > 5760) scale = 5760 / longest;
+        else if (shortest < 256) scale = 256 / shortest;
+        if (scale === 1) return url;
+        const normalizedWidth = Math.round(width * scale);
+        const normalizedHeight = Math.round(height * scale);
+        if (Math.min(normalizedWidth, normalizedHeight) < 256 || Math.max(normalizedWidth, normalizedHeight) > 5760) {
+            throw new Error(`参考图片 ${width}×${height} 缩放后仍超出 256–5760 px，宽高比过于极端，请先裁剪再试`);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = normalizedWidth;
+        canvas.height = normalizedHeight;
+        canvas.getContext("2d").drawImage(image, 0, 0, normalizedWidth, normalizedHeight);
+        return canvas.toDataURL(/png/i.test(url.slice(0, 40)) ? "image/png" : "image/jpeg", 0.92);
+    }
+
     if ((videos || []).length) {
         throw new Error("Agnes 视频参考视频需要可公开访问的 URL，画布本地视频无法直接上传");
     }
 
     const aspect = ["1:1", "3:4", "4:3", "16:9", "9:16", "21:9"].includes(String(ratio)) ? ratio : "16:9";
-    const references = images.map((image) => mediaRef(image, "参考图片"));
+    const references = await Promise.all(images.map(async (image) => normalizeImage(mediaRef(image, "参考图片"))));
     const audioRefs = await Promise.all((audios || []).map(async (file) => mediaRef(await fileDataUrl(file), "参考音频")));
     if (flash && references.length > 5) throw new Error("Agnes Video 2.5 Flash 最多支持 5 张参考图");
     if (audioRefs.length > 3) throw new Error("Agnes 视频最多支持 3 段参考音频");

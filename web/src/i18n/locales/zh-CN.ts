@@ -1150,6 +1150,7 @@ export default {
             codexBusy: "助手正在运行，请完成当前任务后再提炼 Skill",
             noConversation: "当前对话还没有可提炼的已完成内容",
             noCanvas: "当前页面没有可提炼的画布",
+            emptyCanvas: "当前画布还没有节点，先添加节点再生成草稿",
             connecting: "当前页面仍在连接 Agent，请稍后再试",
             syncFailed: "同步当前画布失败，请检查 Agent 连接后重试",
             noDraft: "未生成 Skill 草稿",

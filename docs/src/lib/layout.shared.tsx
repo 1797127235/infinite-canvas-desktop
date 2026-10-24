@@ -1,5 +1,5 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
-import { appNames, gitConfig } from './shared';
+import { appName, gitConfig } from './shared';
 import { ArrowUpRight } from 'lucide-react';
 import { i18n } from './i18n';
 import { uiTranslations } from 'fumadocs-ui/i18n';
@@ -8,9 +8,6 @@ const githubUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
 const qqUrl = 'https://qm.qq.com/q/DFnKzZ807u';
 
 export const translations = i18n.translations().extend(uiTranslations()).add('ui', {
-  en: {
-    displayName: 'English',
-  },
   'zh-CN': {
     displayName: '简体中文',
     search: '搜索文档',
@@ -20,7 +17,6 @@ export const translations = i18n.translations().extend(uiTranslations()).add('ui
     toc: '本页目录',
     tocNoHeadings: '本页没有标题',
     tocInline: '本页内容',
-    chooseLanguage: '选择语言',
     nextPage: '下一页',
     previousPage: '上一页',
     chooseTheme: '选择主题',
@@ -43,10 +39,7 @@ export const translations = i18n.translations().extend(uiTranslations()).add('ui
   },
 });
 
-export function baseOptions(locale: string): BaseLayoutProps {
-  const chinese = locale === 'zh-CN';
-  const appName = appNames[locale as keyof typeof appNames];
-
+export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
       title: (
@@ -58,14 +51,14 @@ export function baseOptions(locale: string): BaseLayoutProps {
     },
     links: [
       {
-        text: chinese ? '文档导航' : 'Documentation',
-        url: `${chinese ? '/zh-CN' : ''}/docs/overview/quick-start`,
+        text: '文档导航',
+        url: '/docs/overview/quick-start',
         on: 'nav',
       },
       {
         text: (
           <span className="inline-flex items-center gap-1.5">
-            <span>{chinese ? '在线体验' : 'Live Demo'}</span>
+            <span>在线体验</span>
             <ArrowUpRight className="size-4" />
           </span>
         ),
