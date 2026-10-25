@@ -8,7 +8,7 @@
 
 - M1 网关 ✅：`asset-gateway/`（init/分片/complete/签名取回/DO 额度/魔数嗅探），Vitest 8/8 通过；已部署到 `assets.antest.cc.cd`（APAC 桶 + `ref/` 1 天生命周期 + 上游拉取实测通过）。
 - M2 客户端接入 ✅：`web/src/services/api/object-storage.ts` 的 `uploadAsset()` 注入模型调用脚本（分片上传、默认直接上传、无 Key 返回 null）；Grok 视频脚本改为「网关 URL 优先、参考图降级总预算 440 KB 压缩 base64、参考视频直接报错」，真实任务验证通过。
-- M3 全渠道接入 ✅：MiniMax-H3 / H3-Max / wan3 三个脚本同样接入 `uploadAsset`（URL 优先、失败回退原 base64 校验流程）；Grok、H3-Max、wan3 均已用真实任务验证 URL 全链路。顺带修复 wan3 渠道自上线以来不可用的问题（DashScope 原生路径 `/api/v1/...` 被 `buildApiUrl` 叠加 `/v1` 前缀导致 404，模型脚本的 `/api/` 开头路径现按原样拼接）。
+- M3 全渠道接入 ✅（按渠道分流）：Grok 走网关 URL（境外上游拉取实测稳定）；MiniMax / 万相改回 Base64 直传——实测国内上游（DashScope / MiniMax 服务器）从 Cloudflare 拉素材跨 jpg/png、2.4MB～18.7MB、多小时十几次任务全部失败（下载超时），无法依赖；三类渠道均带参考图真实出片验证通过。顺带修复 wan3 渠道自上线以来不可用的问题（DashScope 原生路径 `/api/v1/...` 被 `buildApiUrl` 叠加 `/v1` 前缀导致 404，模型脚本的 `/api/` 开头路径现按原样拼接）。
 - 后续增强（可选）：上传进度 UI（`uploadAsset` 已支持 onProgress，画布节点未展示）；网关用量看板与异常告警。
 
 ## 本地 Agent 与 Skill

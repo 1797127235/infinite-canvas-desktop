@@ -36,6 +36,27 @@ async function normalizeImage(url) {
     canvas.getContext("2d").drawImage(image, 0, 0, normalizedWidth, normalizedHeight);
     return canvas.toDataURL(/png/i.test(url.slice(0, 40)) ? "image/png" : "image/jpeg", 0.92);
 }
+// 提交体积控制：超过 3 MB 的参考图等比压缩（Base64 提交体积小、上游下载快；国内上游拉 Cloudflare 素材不可靠，不走网关链接）。
+async function compressForGateway(url, capBytes = 3 * MB) {
+    const bytesOf = (value) => {
+        const encoded = value.slice(value.indexOf(",") + 1).replace(/\s/g, "");
+        return (encoded.length * 3) / 4;
+    };
+    if (bytesOf(url) <= capBytes) return url;
+    const image = await loadImage(url);
+    const canvas = document.createElement("canvas");
+    for (const longest of [2560, 2048, 1600, 1280, 1024]) {
+        const scale = Math.min(1, longest / Math.max(image.naturalWidth, image.naturalHeight));
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+        for (const quality of [0.9, 0.8, 0.7, 0.6]) {
+            const out = canvas.toDataURL("image/jpeg", quality);
+            if (bytesOf(out) <= capBytes) return out;
+        }
+    }
+    return canvas.toDataURL("image/jpeg", 0.6);
+}
 async function validateImage(url) {
     const match = url.match(/^data:image\/(jpeg|jpg|png|webp|heic|heif);base64,([\s\S]+)$/i);
     if (!match) throw new Error("参考图片仅支持 JPG、JPEG、PNG、WEBP、HEIC、HEIF 的 Data URL");
@@ -131,29 +152,17 @@ if (!images.length && !videos.length && !audios.length && ratio === "adaptive") 
 // 携带视频/音频时，所有图片统一作为参考图，避免与首尾帧互斥字段混用。
 for (let index = 0; index < images.length; index++) {
     images[index] = await normalizeImage(images[index]);
+    images[index] = await compressForGateway(images[index]);
 }
-// 官方素材网关优先：全部素材换成 24 小时公网 URL，绕开 base64 体积限制；任一失败整体走原 base64 流程。
-const assetUrls = [];
-for (const source of [...images, ...videos, ...audios]) {
-    const asset = await uploadAsset?.(source).catch(() => null);
-    if (!asset) {
-        assetUrls.length = 0;
-        break;
-    }
-    assetUrls.push(asset.url);
-}
-const viaUrl = assetUrls.length === images.length + videos.length + audios.length;
-if (!viaUrl) {
-    for (let index = 0; index < images.length; index++) await validateImage(images[index]);
-    await validateMedia(videos, "video");
-    await validateMedia(audios, "audio");
-}
+for (let index = 0; index < images.length; index++) await validateImage(images[index]);
+await validateMedia(videos, "video");
+await validateMedia(audios, "audio");
 const content = [{ type: "text", text: prompt }];
 for (let index = 0; index < images.length; index++) {
-    content.push({ type: "image_url", image_url: { url: viaUrl ? assetUrls[index] : images[index] }, role: referenceMode ? "reference_image" : index === 0 ? "first_frame" : "last_frame" });
+    content.push({ type: "image_url", image_url: { url: images[index] }, role: referenceMode ? "reference_image" : index === 0 ? "first_frame" : "last_frame" });
 }
-for (let index = 0; index < videos.length; index++) content.push({ type: "video_url", video_url: { url: viaUrl ? assetUrls[images.length + index] : await toDataUrl(videos[index]) }, role: "reference_video" });
-for (let index = 0; index < audios.length; index++) content.push({ type: "audio_url", audio_url: { url: viaUrl ? assetUrls[images.length + videos.length + index] : await toDataUrl(audios[index]) }, role: "reference_audio" });
+for (const file of videos) content.push({ type: "video_url", video_url: { url: await toDataUrl(file) }, role: "reference_video" });
+for (const file of audios) content.push({ type: "audio_url", audio_url: { url: await toDataUrl(file) }, role: "reference_audio" });
 const body = { model, content, duration: seconds, resolution, ratio: images.length && !referenceMode ? "adaptive" : ratio };
 if (params.watermark !== undefined) body.aigc_watermark = params.watermark === true;
 checkBody(body);

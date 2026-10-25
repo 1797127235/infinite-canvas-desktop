@@ -36,6 +36,27 @@ async function normalizeImage(url) {
     canvas.getContext("2d").drawImage(image, 0, 0, normalizedWidth, normalizedHeight);
     return canvas.toDataURL(/png/i.test(url.slice(0, 40)) ? "image/png" : "image/jpeg", 0.92);
 }
+// 提交体积控制：超过 3 MB 的参考图等比压缩（Base64 提交体积小、上游下载快；国内上游拉 Cloudflare 素材不可靠，不走网关链接）。
+async function compressForGateway(url, capBytes = 3 * MB) {
+    const bytesOf = (value) => {
+        const encoded = value.slice(value.indexOf(",") + 1).replace(/\s/g, "");
+        return (encoded.length * 3) / 4;
+    };
+    if (bytesOf(url) <= capBytes) return url;
+    const image = await loadImage(url);
+    const canvas = document.createElement("canvas");
+    for (const longest of [2560, 2048, 1600, 1280, 1024]) {
+        const scale = Math.min(1, longest / Math.max(image.naturalWidth, image.naturalHeight));
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+        for (const quality of [0.9, 0.8, 0.7, 0.6]) {
+            const out = canvas.toDataURL("image/jpeg", quality);
+            if (bytesOf(out) <= capBytes) return out;
+        }
+    }
+    return canvas.toDataURL("image/jpeg", 0.6);
+}
 async function validateImage(url) {
     const match = url.match(/^data:image\/(jpeg|jpg|png|webp|heic|heif);base64,([\s\S]+)$/i);
     if (!match) throw new Error("参考图片仅支持 JPG、JPEG、PNG、WEBP、HEIC、HEIF 的 Data URL");
@@ -126,13 +147,10 @@ if (!["480p", "720p", "768p", "1080p", "2k"].includes(uiResolution)) throw new E
 if (images.length > 1 || videos.length || audios.length) throw new Error("C2A H3 的 /v1/videos 目前仅确认单张参考图；首尾帧、视频和音频参考请使用 H3-Max");
 for (let index = 0; index < images.length; index++) {
     images[index] = await normalizeImage(images[index]);
+    images[index] = await compressForGateway(images[index]);
+    await validateImage(images[index]);
 }
-// 官方素材网关优先：换成 24 小时公网 URL 绕开 base64 体积限制；失败走原 base64 校验。
-const asset = await uploadAsset?.(images[0]).catch(() => null);
-const imageUrl = asset ? asset.url : images[0];
-if (!asset) {
-    for (let index = 0; index < images.length; index++) await validateImage(images[index]);
-}
+const imageUrl = images[0];
 const use2K = ["1080p", "2k"].includes(uiResolution);
 const size = use2K ? (ratio === "16:9" ? "1792x1024" : "1024x1792") : ratio === "16:9" ? "1280x720" : "720x1280";
 const body = { model, prompt, seconds, size };

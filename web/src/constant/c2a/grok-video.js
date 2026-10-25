@@ -63,9 +63,13 @@ function apiError(error) {
     return new Error(String(reason || "C2A Grok 视频任务创建失败"));
 }
 
+// 参考图统一先归一化（尺寸限制）并压到 3 MB 内再上传/提交：
+// 上游（含境外 xAI）从网关拉大图都慢，18 MB 级原图下载容易超时，参考图画质 3 MB 足够。
+const normalizedImages = await Promise.all(images.map((url) => normalizeImage(url).then((normalized) => compressToBudget(normalized, 3 * 1024 * 1024))));
+
 // 官方素材网关：单张失败即整体降级，保持一次请求内素材形态一致。
 const assetUrls = [];
-for (const source of [...images, ...videos]) {
+for (const source of [...normalizedImages, ...videos]) {
     const asset = await uploadAsset?.(source).catch(() => null);
     if (!asset) {
         assetUrls.length = 0;
@@ -73,7 +77,7 @@ for (const source of [...images, ...videos]) {
     }
     assetUrls.push(asset.url);
 }
-const viaUrl = assetUrls.length === images.length + videos.length;
+const viaUrl = assetUrls.length === normalizedImages.length + videos.length;
 if (videos.length && !viaUrl) throw new Error("参考视频体积过大，必须经官方素材网关以链接提交；本次上传未完成，请重试或在配置里检查网络");
 
 let referenceImages;
@@ -81,8 +85,8 @@ if (viaUrl) {
     referenceImages = assetUrls;
 } else {
     // base64 降级：素材字节总预算 440 KB（×1.33 base64 膨胀后约 585 KB 请求体，实测上限约 675 KB）。
-    const budget = Math.floor((440 * 1024) / images.length);
-    referenceImages = await Promise.all(images.map((url) => normalizeImage(url).then((normalized) => compressToBudget(normalized, budget))));
+    const budget = Math.floor((440 * 1024) / normalizedImages.length);
+    referenceImages = await Promise.all(normalizedImages.map((url) => compressToBudget(url, budget)));
 }
 
 const body = { model, prompt, duration: Number(params.seconds) || 8, resolution: params.resolution || "720p", aspect_ratio: params.ratio || "16:9" };

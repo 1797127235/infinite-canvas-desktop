@@ -1,5 +1,6 @@
 // 万相 3.0（wan3.0-video / wan3.0-video-prime）· C2A 中转
 // 上游协议：DashScope 原生异步视频合成，与 [OI] Videos 不通用。
+// 参考素材以 Base64 Data URL 直传（国内上游从 Cloudflare 拉素材不可靠，实测多尺寸/类型稳定失败），提交前先压到 3 MB。
 // 官方文档：https://help.aliyun.com/zh/model-studio/wan3-video-generation-api-reference
 // C2A 端点：https://www.codex2api.com/docs/wan-create 、/docs/wan-query
 const MB = 1024 * 1024;
@@ -52,6 +53,23 @@ function dataUrlBytes(url) {
     if (comma < 0) throw new Error("素材必须是 Base64 Data URL");
     const encoded = url.slice(comma + 1).replace(/\s/g, "");
     return Math.floor((encoded.length * 3) / 4) - (encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0);
+}
+// 提交体积控制：超过 3 MB 的参考图等比压缩（长边逐级降档 + 逐级降质量），Base64 提交体积小、上游处理快。
+async function compressForGateway(url, capBytes) {
+    if (dataUrlBytes(url) <= capBytes) return url;
+    const image = await loadImage(url);
+    const canvas = document.createElement("canvas");
+    for (const longest of [2560, 2048, 1600, 1280, 1024]) {
+        const scale = Math.min(1, longest / Math.max(image.naturalWidth, image.naturalHeight));
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+        for (const quality of [0.9, 0.8, 0.7, 0.6]) {
+            const out = canvas.toDataURL("image/jpeg", quality);
+            if (dataUrlBytes(out) <= capBytes) return out;
+        }
+    }
+    return canvas.toDataURL("image/jpeg", 0.6);
 }
 async function validateImage(url) {
     if (!/^data:image\/(jpeg|jpg|png|bmp|webp);base64,/i.test(url)) throw new Error("参考图片仅支持 JPG、JPEG、PNG、BMP、WEBP 的 Data URL（不支持 HEIC/HEIF 与透明通道）");
@@ -137,37 +155,24 @@ if (frames && images.length > 2) throw new Error("首尾帧模式最多 2 张图
 if (!frames && images.length > 10) throw new Error("参考图片最多 10 张");
 for (let index = 0; index < images.length; index++) {
     images[index] = await normalizeImage(images[index]);
+    images[index] = await compressForGateway(images[index], 3 * MB);
 }
-// 官方素材网关优先：全部素材换成 24 小时公网 URL（官方公网通道图片 20MB / 视频 100MB / 音频 15MB）；
-// 任一上传失败则整体走原 Base64 流程（单条 14 MiB、总 JSON 64 MB）。
-const assetUrls = [];
-for (const source of [...images, ...videos, ...audios]) {
-    const asset = await uploadAsset?.(source).catch(() => null);
-    if (!asset) {
-        assetUrls.length = 0;
-        break;
-    }
-    assetUrls.push(asset.url);
-}
-const viaUrl = assetUrls.length === images.length + videos.length + audios.length;
 const mediaSeconds = videos.length || audios.length
-    ? (await validateMedia(videos, "video", viaUrl ? 100 * MB : MAX_ITEM)) + (await validateMedia(audios, "audio", viaUrl ? 15 * MB : MAX_ITEM))
+    ? (await validateMedia(videos, "video", MAX_ITEM)) + (await validateMedia(audios, "audio", MAX_ITEM))
     : 0;
 // 有视频/音频输入时：输入总时长 + 输出时长 ≤ 30 秒。单段 ≤15 秒，所以上限恒 ≥15。
 // 策略：静默压到上限（不弹错），用户选的 30 秒与「输入 5 + 输出 25」在账面一致。
 const duration = mediaSeconds ? Math.min(requested, 30 - mediaSeconds) : requested;
 const media = [];
 if (frames) {
-    if (images[0]) media.push({ type: "first_frame", url: viaUrl ? assetUrls[0] : images[0] });
-    if (images[1]) media.push({ type: "last_frame", url: viaUrl ? assetUrls[1] : images[1] });
+    if (images[0]) media.push({ type: "first_frame", url: images[0] });
+    if (images[1]) media.push({ type: "last_frame", url: images[1] });
 } else {
-    for (let index = 0; index < images.length; index++) media.push({ type: "reference_image", url: viaUrl ? assetUrls[index] : images[index] });
-    for (let index = 0; index < videos.length; index++) media.push({ type: "reference_video", url: viaUrl ? assetUrls[images.length + index] : await toDataUrl(videos[index]) });
-    for (let index = 0; index < audios.length; index++) media.push({ type: "reference_audio", url: viaUrl ? assetUrls[images.length + videos.length + index] : await toDataUrl(audios[index]) });
+    for (const url of images) media.push({ type: "reference_image", url });
+    for (const file of videos) media.push({ type: "reference_video", url: await toDataUrl(file) });
+    for (const file of audios) media.push({ type: "reference_audio", url: await toDataUrl(file) });
 }
-if (!viaUrl) {
-    for (let index = 0; index < images.length; index++) await validateImage(images[index]);
-}
+for (let index = 0; index < images.length; index++) await validateImage(images[index]);
 // 首尾帧比例由图片决定；参考模式用画布比例（多素材时上游的 adaptive 选择不可预测）。
 const ratio = frames ? (media.length ? "adaptive" : params.ratio || "16:9") : params.ratio || "adaptive";
 if (!RATIOS.includes(ratio)) throw new Error(`万相 3.0 不支持输出比例 ${ratio}`);
