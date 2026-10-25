@@ -16,3 +16,6 @@ web/public/plugins
 plugins/canvas/*/dist
 plugins/canvas/*/node_modules
 web/public/plugins.wrangler/
+
+# wrangler 本地状态
+.wrangler/
