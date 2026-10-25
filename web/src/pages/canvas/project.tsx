@@ -2781,7 +2781,15 @@ function InfiniteCanvasPage() {
                     }),
                 );
             } catch (error) {
-                if (isGenerationCanceled(error)) return;
+                if (isGenerationCanceled(error)) {
+                    // 同一配置节点立即重跑会中断上一轮；上一轮已建上游任务的结果节点转入静默续询，避免永远停在「生成中」。
+                    // 手动停止会把节点置回空闲（stopGenerationByRunningId），这里只接手仍在生成中的节点。
+                    pendingChildIds.forEach((id) => {
+                        const node = nodesRef.current.find((item) => item.id === id);
+                        if (node?.metadata?.status === NODE_STATUS_LOADING && hasResumableVideoTask(node)) void pollVideoNodeTask(node, true);
+                    });
+                    return;
+                }
                 const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
                 message.error(errorDetails);
                 setNodes((prev) =>
@@ -2806,7 +2814,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
+        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, pollVideoNodeTask, startGenerationRequest, t],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
