@@ -390,7 +390,7 @@ export function startHttpServer() {
                 onFinish: () => {
                     logger.info("Codex turn finished", { threadId, turnId });
                     if (!turnId) void messageMetadataStore.remove(messageId, threadId).catch((error) => logger.warn("Failed to remove unbound message metadata", { clientMessageId: messageId, error }));
-                    session.clearTurnAttachments(clientId);
+                    // 附件保留到下一回合 setTurnAttachments 覆盖或页面断开时清理：回合失败后用户重试/续跑时，模型仍引用上一回合的附件。
                     if (clientId) session.releaseClient(clientId);
                     session.setCodexState({ busy: false, threadId, turnId });
                     session.finishConversationRun(threadId);

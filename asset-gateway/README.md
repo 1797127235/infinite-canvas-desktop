@@ -15,7 +15,7 @@
 ```
 
 - 对象按内容寻址（sha256）：同一素材重复上传直接命中换发新 URL，不占额度。
-- 额度：单 Key 每日 200 MB / 50 次（`src/limits.ts`）；单文件 20 MiB；分片 8 MiB。
+- 限制（测试阶段）：仅校验 Key，不设用量/频率限制；单文件 20 MiB（对齐 xAI）、分片 8 MiB、类型白名单。用户规模上来后再评估限流（`src/limits.ts` + `src/rate-limiter.ts`）。
 - 上传令牌（1h）与取回 URL（24h）均为 HMAC-SHA256 签名的自包含凭据。
 - 类型白名单：JPEG / PNG / WebP / MP4 / MOV，首片魔数嗅探校验。
 

@@ -89,7 +89,7 @@ test("当前 turn 的图片附件可在发起标签页画布创建图片节点",
     assert.equal(created.nodes[0].id, nodes[0].id);
     assert.equal(created.nodes[0].attachmentId, "attachment-1");
     session.clearTurnAttachments("first");
-    assert.throws(() => session.getTurnAttachment("first", "attachment-1"), /找不到/);
+    assert.throws(() => session.getTurnAttachment("first", "attachment-1"), /不存在或已失效/);
 });
 
 test("图片附件只允许发起 turn 的标签页读取和落入画布", async (t) => {

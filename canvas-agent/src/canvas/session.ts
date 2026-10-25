@@ -363,10 +363,10 @@ export class CanvasSession {
         });
     }
 
-    /** 获取属于指定网页 turn 的图片附件。 */
+    /** 获取本轮（或本线程此前回合）可用的图片附件；回合结束不清空，重试/续跑的回合仍可引用。 */
     getTurnAttachment(clientId: string, attachmentId: string) {
         const attachment = this.turnAttachments.get(attachmentId);
-        if (!attachment) throw new Error(`找不到本轮图片附件：${attachmentId}`);
+        if (!attachment) throw new Error(`图片附件不存在或已失效：${attachmentId}；请让用户重新上传，或改用画布上已有的图片节点`);
         if (attachment.clientId !== clientId) throw new Error("图片附件不属于当前 turn 的发起标签页");
         return attachment;
     }

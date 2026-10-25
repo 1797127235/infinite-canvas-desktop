@@ -88,14 +88,8 @@ export default {
             poll: "轮询 poll(request, extract, {intervalMs,timeoutMs})，extract 返回真值即结束",
             sleep: "sleep(ms) 延时",
             signal: "取消信号，可透传给 http/request",
-            uploadAsset: "uploadAsset(source, { onProgress }) 把参考图（dataURL）或参考视频（File）上传官方素材网关，返回 { url, expiresAt }（24 小时有效）；未配置 Key、用户拒绝或上传失败返回 null/抛错，脚本需自行降级",
+            uploadAsset: "uploadAsset(source, { onProgress }) 把参考图（dataURL）或参考视频（File）上传官方素材网关（默认直接上传），返回 { url, expiresAt }（24 小时有效）；未配置 Key 或上传失败返回 null/抛错，脚本需自行降级",
             onDelta: "onDelta(text) 推送流式文本（文本模型）",
-        },
-        assetUpload: {
-            title: "上传参考素材",
-            notice: "参考素材将上传到官方素材网关，生成 24 小时有效的临时链接供 AI 服务下载，到期自动删除。是否允许？",
-            allow: "允许并不再提示",
-            deny: "本次不上传",
         },
         returns: {
             image: "文生图（images 为空）和图生图（images 有参考图）接口不同，脚本需自行区分；返回图片 URL 或 dataURL 字符串，也可返回它们的数组，或 [{ dataUrl }] / [{ url }] / [{ b64_json }]",

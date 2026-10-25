@@ -112,21 +112,6 @@ describe("上传与取回", () => {
         expect(response.status).toBe(401);
     });
 
-    it("超出每日字节额度返回 429", async () => {
-        const size = 19 * 1024 * 1024;
-        let last = 200;
-        for (let index = 0; index < 12; index++) {
-            const response = await call("http://assets.test/upload/init", {
-                method: "POST",
-                headers: { Authorization: "Bearer valid-key", "Content-Type": "application/json" },
-                body: JSON.stringify({ sha256: sha(index + 100), size, contentType: "image/png" }),
-            });
-            last = response.status;
-            if (response.status === 429) break;
-        }
-        expect(last).toBe(429);
-    });
-
     it("签名 URL 过期后取回被拒", async () => {
         const expired = Date.now() - 1;
         const sig = await signUrl("test-secret", "ref/bb.png", expired);

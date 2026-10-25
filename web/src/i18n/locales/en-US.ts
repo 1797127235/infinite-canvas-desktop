@@ -94,14 +94,8 @@ export default {
             poll: "poll(request, extract, {intervalMs,timeoutMs}) continues until extract returns a truthy value",
             sleep: "Delay with sleep(ms)",
             signal: "Cancellation signal that can be passed to http/request",
-            uploadAsset: "uploadAsset(source, { onProgress }) uploads a reference image (data URL) or video (File) to the official asset gateway and returns { url, expiresAt } (valid for 24 hours). Returns null or throws when no key is configured, the user declines, or the upload fails — scripts should fall back accordingly.",
+            uploadAsset: "uploadAsset(source, { onProgress }) uploads a reference image (data URL) or video (File) to the official asset gateway (uploads by default) and returns { url, expiresAt } (valid for 24 hours). Returns null or throws when no key is configured or the upload fails — scripts should fall back accordingly.",
             onDelta: "Push streaming text with onDelta(text) for text models",
-        },
-        assetUpload: {
-            title: "Upload reference assets",
-            notice: "Reference assets will be uploaded to the official asset gateway as temporary links (valid for 24 hours, then auto-deleted) so AI services can download them. Allow?",
-            allow: "Allow and don't ask again",
-            deny: "Not this time",
         },
         returns: {
             image: "Text-to-image and image editing use different APIs; distinguish them by whether images is empty. Return an image URL or data URL, an array of them, or [{ dataUrl }] / [{ url }] / [{ b64_json }].",

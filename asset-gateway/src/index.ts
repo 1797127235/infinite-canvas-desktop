@@ -5,7 +5,7 @@
  */
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { ALLOWED_TYPES, CHUNK_BYTES, MAX_FILE_BYTES, URL_TTL_MS } from "./limits";
+import { ALLOWED_TYPES, CHUNK_BYTES, MAX_FILE_BYTES, MAX_PART_BYTES, URL_TTL_MS } from "./limits";
 import { RateLimiter } from "./rate-limiter";
 import { signUpload, signUrl, verifyUpload, verifyUrl } from "./sign";
 import { sniffType } from "./magic";
@@ -68,7 +68,8 @@ app.put("/upload/part", async (context) => {
     if (!claims || !Number.isInteger(partNumber) || partNumber < 1) return context.json({ error: "上传令牌无效或已过期，请重新发起上传" }, 401);
 
     const body = new Uint8Array(await context.req.arrayBuffer());
-    if (body.length > CHUNK_BYTES) return context.json({ error: "分片超过 8 MiB" }, 413);
+    console.log(`[part] part=${partNumber} bytes=${body.length} sha=${claims.sha256.slice(0, 8)}`);
+    if (body.length > MAX_PART_BYTES) return context.json({ error: `分片超过 ${Math.floor(MAX_PART_BYTES / 1024 / 1024)} MiB（实际收到 ${body.length} 字节）` }, 413);
     if (partNumber === 1 && !sniffType(body, claims.type)) return context.json({ error: "文件内容与声明的类型不符" }, 415);
 
     const upload = context.env.ASSETS.resumeMultipartUpload(objectKey(claims.sha256, claims.type), claims.uid);
