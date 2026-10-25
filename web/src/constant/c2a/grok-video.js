@@ -1,4 +1,7 @@
-// 参考图先压到 [256, 5760] 内：上游对超出边长的图直接返回 400，本地先解决尺寸问题。
+// Grok Imagine 视频（grok-imagine-video-1.5 / -preview）· C2A 中转
+// 上游对 base64 参考图有约 600 KB 的总请求体限制（实测），视频参考素材不可能走 base64。
+// 策略：素材先经官方素材网关换 24 小时公网 URL（上游实测 9 MB+ 可用）；
+// 网关不可用/用户拒绝时，参考图降级为总预算内的压缩 base64，参考视频直接报错。
 function loadImage(url) {
     return new Promise((resolve, reject) => {
         const image = new Image();
@@ -7,6 +10,7 @@ function loadImage(url) {
         image.src = url;
     });
 }
+// 参考图先压到 [256, 5760] 内：上游对超出边长的图直接返回 400，本地先解决尺寸问题。
 async function normalizeImage(url) {
     const image = await loadImage(url);
     const width = image.naturalWidth;
@@ -28,29 +32,67 @@ async function normalizeImage(url) {
     canvas.getContext("2d").drawImage(image, 0, 0, normalizedWidth, normalizedHeight);
     return canvas.toDataURL(/png/i.test(url.slice(0, 40)) ? "image/png" : "image/jpeg", 0.92);
 }
+function dataUrlBytes(url) {
+    const encoded = url.slice(url.indexOf(",") + 1).replace(/\s/g, "");
+    return Math.floor((encoded.length * 3) / 4) - (encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0);
+}
+// 总预算内逐级降 JPEG 质量，仍超时再等比缩小边长（不低于 256 px）。
+async function compressToBudget(url, budgetBytes) {
+    const image = await loadImage(url);
+    const qualities = [0.92, 0.8, 0.7, 0.6, 0.5];
+    let best = "";
+    for (let scale = 1; Math.round(Math.max(image.naturalWidth, image.naturalHeight) * scale) >= 256 && !best; scale *= 0.8) {
+        const width = Math.round(image.naturalWidth * scale);
+        const height = Math.round(image.naturalHeight * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(image, 0, 0, width, height);
+        for (const quality of qualities) {
+            const dataUrl = canvas.toDataURL("image/jpeg", quality);
+            if (dataUrlBytes(dataUrl) <= budgetBytes) return dataUrl;
+            best = dataUrl;
+        }
+    }
+    return best;
+}
 // 上游 400 的正文必须透出来，否则用户只能看到 status code 400。
 function apiError(error) {
     const data = error && error.response && error.response.data;
     const reason = (data && data.error && (data.error.message || data.error)) || (data && (data.message || data.detail)) || (error && error.message);
     return new Error(String(reason || "C2A Grok 视频任务创建失败"));
 }
-const normalizedImages = await Promise.all(images.map((url) => normalizeImage(url)));
+
+// 官方素材网关：单张失败即整体降级，保持一次请求内素材形态一致。
+const assetUrls = [];
+for (const source of [...images, ...videos]) {
+    const asset = await uploadAsset?.(source).catch(() => null);
+    if (!asset) {
+        assetUrls.length = 0;
+        break;
+    }
+    assetUrls.push(asset.url);
+}
+const viaUrl = assetUrls.length === images.length + videos.length;
+if (videos.length && !viaUrl) throw new Error("参考视频体积过大，必须经官方素材网关以链接提交；本次上传未完成，请重试或在配置里检查网络");
+
+let referenceImages;
+if (viaUrl) {
+    referenceImages = assetUrls;
+} else {
+    // base64 降级：素材字节总预算 440 KB（×1.33 base64 膨胀后约 585 KB 请求体，实测上限约 675 KB）。
+    const budget = Math.floor((440 * 1024) / images.length);
+    referenceImages = await Promise.all(images.map((url) => normalizeImage(url).then((normalized) => compressToBudget(normalized, budget))));
+}
+
 const body = { model, prompt, duration: Number(params.seconds) || 8, resolution: params.resolution || "720p", aspect_ratio: params.ratio || "16:9" };
 if (params.generateAudio !== undefined) body.generate_audio = params.generateAudio !== false;
 if (params.watermark !== undefined) body.watermark = params.watermark === true;
-if (params.mode === "frames" && normalizedImages.length >= 2) {
-    body.image = { url: normalizedImages[0] };
-    body.last_frame = { url: normalizedImages[1] };
-} else if (normalizedImages.length) body.reference_images = normalizedImages.map((url) => ({ url }));
-if (videos.length) {
-    const toDataUrl = async (file) => {
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        let binary = "";
-        for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-        return `data:${file.type || "video/mp4"};base64,${btoa(binary)}`;
-    };
-    body.videos = (await Promise.all(videos.map(toDataUrl))).map((url) => ({ url }));
-}
+if (params.mode === "frames" && referenceImages.length >= 2) {
+    body.image = { url: referenceImages[0] };
+    body.last_frame = { url: referenceImages[1] };
+} else if (referenceImages.length) body.reference_images = referenceImages.map((url) => ({ url }));
+if (videos.length) body.videos = assetUrls.slice(images.length).map((url) => ({ url }));
 const created = await request({ method: "post", url: "/videos/generations", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, data: body }).catch((error) => {
     throw apiError(error);
 });

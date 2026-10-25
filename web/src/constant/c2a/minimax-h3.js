@@ -126,12 +126,17 @@ if (!["480p", "720p", "768p", "1080p", "2k"].includes(uiResolution)) throw new E
 if (images.length > 1 || videos.length || audios.length) throw new Error("C2A H3 的 /v1/videos 目前仅确认单张参考图；首尾帧、视频和音频参考请使用 H3-Max");
 for (let index = 0; index < images.length; index++) {
     images[index] = await normalizeImage(images[index]);
-    await validateImage(images[index]);
+}
+// 官方素材网关优先：换成 24 小时公网 URL 绕开 base64 体积限制；失败走原 base64 校验。
+const asset = await uploadAsset?.(images[0]).catch(() => null);
+const imageUrl = asset ? asset.url : images[0];
+if (!asset) {
+    for (let index = 0; index < images.length; index++) await validateImage(images[index]);
 }
 const use2K = ["1080p", "2k"].includes(uiResolution);
 const size = use2K ? (ratio === "16:9" ? "1792x1024" : "1024x1792") : ratio === "16:9" ? "1280x720" : "720x1280";
 const body = { model, prompt, seconds, size };
-if (images[0]) body.input_reference = { image_url: images[0] };
+if (images[0]) body.input_reference = { image_url: imageUrl };
 checkBody(body);
 const created = await request({ method: "post", url: "/videos", headers, data: body });
 const taskId = created.id || created.task_id;

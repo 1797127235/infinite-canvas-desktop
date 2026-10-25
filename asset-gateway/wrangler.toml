@@ -1,0 +1,31 @@
+name = "asset-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# 对外服务域名：部署时自动在 zone antest.cc.cd 下绑定并签发证书
+routes = [
+  { pattern = "assets.antest.cc.cd", custom_domain = true }
+]
+
+# 素材桶：私有，桶上需配置 1 天生命周期自动删除（见 README）
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "infinite-canvas-assets"
+
+# 额度与 key 校验缓存：按 API Key 一个 DO 实例，原子记账
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiter"]
+
+[vars]
+# 上游中转站，用于校验用户的 C2A API Key
+C2A_BASE_URL = "https://www.codex2api.com"
+# 对外服务域名（Worker Custom Domain），用于拼取回 URL
+GATEWAY_ORIGIN = "https://assets.antest.cc.cd"
+
+# Secret（wrangler secret put）：
+# SIGNING_SECRET — 上传令牌与取回 URL 的 HMAC 密钥

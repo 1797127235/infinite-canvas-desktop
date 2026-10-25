@@ -5,6 +5,8 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
+- 官方素材网关（全部内置视频模型接入）：带参考素材的视频生成（Grok `grok-imagine-video-1.5` / `-preview`、`MiniMax-H3` / `MiniMax-H3-Max`、`wan3.0-video` / `wan3.0-video-prime`）首次运行应弹出「上传参考素材」确认框，允许后素材经 `assets.antest.cc.cd` 换成 24 小时临时链接提交；拒绝或上传失败时回退原有 base64 流程（Grok 为压缩 base64，MiniMax / 万相为原校验规则）。万相视频模型此前自上线即不可用（404），修复后应能正常创建任务并生成。
+
 - 内置 C2A 中转渠道：全新安装、以及已有配置的旧用户升级后，「配置 → 渠道」都应同时看到「Agnes 中国站」和「C2A 中转」，只差填 API Key；之前只显示一个「默认渠道」的情况应修正。C2A 应包含 `grok-4.7`、`grok-imagine-image-2.0`、`grok-imagine-image-quality`、`grok-imagine-video-1.5`、`grok-imagine-video-1.5-preview`、`MiniMax-H3`、`MiniMax-H3-Max`，其中 4 个视频模型带内置调用脚本。已填过 Key 的渠道不被覆盖，自建的第三方渠道不被删改，用户改过的渠道名不被改回默认名。
 
 - Linux 安装包：`deb` 与 `AppImage` 均应带应用图标（16/32/48/64/128/256/512/1024 八个尺寸，不只有 1024），安装后启动器与任务栏显示画布图标而不是 Electron 默认图标，名称显示「Infinite Canvas」且窗口能正确归组；`dpkg -i` 应无依赖缺失，卸载后不留残留。从零启动时首次会从 npmmirror 下载 Codex 运行时并做 sha512 校验，随后本地代理、Canvas Agent、网页服务依次就绪，页面可正常打开。默认端口 `17370` 被占用时应明确报错并可经 `CANVAS_DESKTOP_WEB_PORT` 换端口。

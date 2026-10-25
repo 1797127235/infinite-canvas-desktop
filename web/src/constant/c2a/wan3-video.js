@@ -81,14 +81,14 @@ async function toDataUrl(file) {
     for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
     return `data:${mime};base64,${btoa(binary)}`;
 }
-async function validateMedia(files, kind) {
+async function validateMedia(files, kind, maxBytes) {
     const video = kind === "video";
     const label = video ? "参考视频" : "参考音频";
     const max = video ? 5 : 5;
     if (files.length > max) throw new Error(`${label}最多 ${max} 段`);
     let total = 0;
     for (const file of files) {
-        if (file.size > MAX_ITEM) throw new Error(`单个${label}超过 14 MB；Base64 通道受上游 20 MiB 单条限制，请先压缩或改用公网 URL`);
+        if (file.size > maxBytes) throw new Error(`单个${label}超过 ${Math.floor(maxBytes / MB)} MB；请先压缩或改用公网 URL`);
         const mime = (file.type || "").toLowerCase();
         const valid = video ? ["video/mp4", "video/quicktime"].includes(mime) : ["audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave", "audio/mpeg", "audio/mp3"].includes(mime);
         const validName = video ? /\.(mp4|mov)$/i.test(file.name) : /\.(wav|mp3)$/i.test(file.name);
@@ -137,20 +137,36 @@ if (frames && images.length > 2) throw new Error("首尾帧模式最多 2 张图
 if (!frames && images.length > 10) throw new Error("参考图片最多 10 张");
 for (let index = 0; index < images.length; index++) {
     images[index] = await normalizeImage(images[index]);
-    await validateImage(images[index]);
 }
-const mediaSeconds = videos.length || audios.length ? (await validateMedia(videos, "video")) + (await validateMedia(audios, "audio")) : 0;
+// 官方素材网关优先：全部素材换成 24 小时公网 URL（官方公网通道图片 20MB / 视频 100MB / 音频 15MB）；
+// 任一上传失败则整体走原 Base64 流程（单条 14 MiB、总 JSON 64 MB）。
+const assetUrls = [];
+for (const source of [...images, ...videos, ...audios]) {
+    const asset = await uploadAsset?.(source).catch(() => null);
+    if (!asset) {
+        assetUrls.length = 0;
+        break;
+    }
+    assetUrls.push(asset.url);
+}
+const viaUrl = assetUrls.length === images.length + videos.length + audios.length;
+const mediaSeconds = videos.length || audios.length
+    ? (await validateMedia(videos, "video", viaUrl ? 100 * MB : MAX_ITEM)) + (await validateMedia(audios, "audio", viaUrl ? 15 * MB : MAX_ITEM))
+    : 0;
 // 有视频/音频输入时：输入总时长 + 输出时长 ≤ 30 秒。单段 ≤15 秒，所以上限恒 ≥15。
 // 策略：静默压到上限（不弹错），用户选的 30 秒与「输入 5 + 输出 25」在账面一致。
 const duration = mediaSeconds ? Math.min(requested, 30 - mediaSeconds) : requested;
 const media = [];
 if (frames) {
-    if (images[0]) media.push({ type: "first_frame", url: images[0] });
-    if (images[1]) media.push({ type: "last_frame", url: images[1] });
+    if (images[0]) media.push({ type: "first_frame", url: viaUrl ? assetUrls[0] : images[0] });
+    if (images[1]) media.push({ type: "last_frame", url: viaUrl ? assetUrls[1] : images[1] });
 } else {
-    for (const url of images) media.push({ type: "reference_image", url });
-    for (const file of videos) media.push({ type: "reference_video", url: await toDataUrl(file) });
-    for (const file of audios) media.push({ type: "reference_audio", url: await toDataUrl(file) });
+    for (let index = 0; index < images.length; index++) media.push({ type: "reference_image", url: viaUrl ? assetUrls[index] : images[index] });
+    for (let index = 0; index < videos.length; index++) media.push({ type: "reference_video", url: viaUrl ? assetUrls[images.length + index] : await toDataUrl(videos[index]) });
+    for (let index = 0; index < audios.length; index++) media.push({ type: "reference_audio", url: viaUrl ? assetUrls[images.length + videos.length + index] : await toDataUrl(audios[index]) });
+}
+if (!viaUrl) {
+    for (let index = 0; index < images.length; index++) await validateImage(images[index]);
 }
 // 首尾帧比例由图片决定；参考模式用画布比例（多素材时上游的 adaptive 选择不可预测）。
 const ratio = frames ? (media.length ? "adaptive" : params.ratio || "16:9") : params.ratio || "adaptive";

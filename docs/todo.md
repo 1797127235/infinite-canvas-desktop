@@ -2,6 +2,15 @@
 
 待办事项。功能测试确认后移入文档站的[待测试](/docs/progress/pending-test)，确认通过后再写进[功能介绍](/docs/overview/features)。
 
+## 素材网关（视频参考素材走公网 URL）
+
+背景：C2A 的 Grok 视频通道对 base64 参考图有约 675 KB 的总请求体硬限制，视频参考素材（几十 MB）更不可能走 base64；公网 URL 实测 9.3 MB 图片全流程通过。方案：Cloudflare Worker + R2 网关把本地素材换成 24 小时签名 URL（`asset-gateway/`，已实现并通过测试）。
+
+- M1 网关 ✅：`asset-gateway/`（init/分片/complete/签名取回/DO 额度/魔数嗅探），Vitest 8/8 通过；已部署到 `assets.antest.cc.cd`（APAC 桶 + `ref/` 1 天生命周期 + 上游拉取实测通过）。
+- M2 客户端接入 ✅：`web/src/services/api/object-storage.ts` 的 `uploadAsset()` 注入模型调用脚本（分片上传、首次隐私确认、拒绝/无 Key 返回 null）；Grok 视频脚本改为「网关 URL 优先、参考图降级总预算 440 KB 压缩 base64、参考视频直接报错」，真实任务验证通过。
+- M3 全渠道接入 ✅：MiniMax-H3 / H3-Max / wan3 三个脚本同样接入 `uploadAsset`（URL 优先、失败回退原 base64 校验流程）；Grok、H3-Max、wan3 均已用真实任务验证 URL 全链路。顺带修复 wan3 渠道自上线以来不可用的问题（DashScope 原生路径 `/api/v1/...` 被 `buildApiUrl` 叠加 `/v1` 前缀导致 404，模型脚本的 `/api/` 开头路径现按原样拼接）。
+- 后续增强（可选）：上传进度 UI（`uploadAsset` 已支持 onProgress，画布节点未展示）；网关用量看板与异常告警。
+
 ## 本地 Agent 与 Skill
 
 - 本地 Agent 接入后续：把 Claude Code CLI Adapter 升级为 Claude Agent SDK Adapter，并完善工具队列体验。

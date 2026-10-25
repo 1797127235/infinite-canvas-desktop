@@ -2,6 +2,7 @@ import axios, { type AxiosRequestConfig } from "axios";
 
 import i18n from "@/i18n";
 import { buildApiUrl, withLocalProxy, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { uploadAsset } from "./object-storage";
 
 type RequestOptions = { signal?: AbortSignal };
 
@@ -41,6 +42,11 @@ function pluginHeaders(extra?: Record<string, string>, hasJsonBody = false): Rec
 
 function pluginUrl(config: AiConfig, path: string) {
     if (/^https?:/i.test(path)) return withLocalProxy(path);
+    // 以 /api/ 开头的是上游原生完整路径（如 DashScope 的 /api/v1/services/...），不再叠加 /v1。
+    if (path.startsWith("/api/")) {
+        const base = config.baseUrl.trim().replace(/\/+$/, "");
+        return withLocalProxy(`${base}${path}`);
+    }
     return buildApiUrl(config.baseUrl, path.startsWith("/") ? path : `/${path}`);
 }
 
@@ -133,6 +139,7 @@ export async function runModelPlugin<T = unknown>(args: RunPluginArgs): Promise<
         "sleep",
         "signal",
         "onDelta",
+        "uploadAsset",
         `"use strict"; return (async () => {\n${args.script}\n})();`,
     ) as (...fnArgs: unknown[]) => Promise<T>;
     try {
@@ -154,6 +161,8 @@ export async function runModelPlugin<T = unknown>(args: RunPluginArgs): Promise<
             (ms: number) => sleep(ms, args.signal),
             args.signal,
             args.onDelta,
+            (source: string | File, opts?: { onProgress?: (loaded: number, total: number) => void }) =>
+                uploadAsset(source, config.apiKey, { ...opts, signal: args.signal }),
         );
     } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") throw error;
@@ -184,6 +193,7 @@ export function getPluginVariables(): PluginVariable[] {
         { name: "poll", type: "function", desc: i18n.t("modelPlugin.variables.poll") },
         { name: "sleep", type: "function", desc: i18n.t("modelPlugin.variables.sleep") },
         { name: "signal", type: "AbortSignal", desc: i18n.t("modelPlugin.variables.signal") },
+        { name: "uploadAsset", type: "function", desc: i18n.t("modelPlugin.variables.uploadAsset"), capabilities: ["image", "video"] },
         { name: "onDelta", type: "function", desc: i18n.t("modelPlugin.variables.onDelta"), capabilities: ["text"] },
     ];
 }
