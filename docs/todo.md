@@ -18,21 +18,6 @@
 
 ## 更新能力
 
-当前桌面版没有任何自动更新：`desktop` 只依赖 `electron` 与 `electron-builder`，没有 `electron-updater`，`electron-builder.yml` 也没有 `publish` 配置，升级只能重新打安装包让用户重装。网页产物、Canvas Agent、本地代理都打在安装包里，所以改一行前端也要重发整个桌面版。
-
-### 桌面程序自动更新
-
-接入 `electron-updater` 与 `publish`，让应用自己检查、下载并在重启后安装。
-
-动手前需要先确认：
-
-- 更新源放在哪里（GitHub Releases 在国内可达性差）
-- 是否购买代码签名证书（Windows 未签名会弹 SmartScreen 警告）
-- 更新失败或用户拒绝时的回退方式
-- Linux 的 AppImage / deb 更新路径差异
-
-必须保持不变的是 `userData` 目录和固定网页端口 `127.0.0.1:17370`——端口一变，按 origin 隔离的本地配置与画布数据就读不到了。
-
 ### 工作流模板在线更新
 
 `web/public/templates/templates.json` 与素材目前打包进安装包，前端只从同源 `/templates/` 读取，既没有版本号也没有远程地址。
@@ -51,8 +36,8 @@
 
 ### 版本更新提示入口缺失
 
-`web/src/components/layout/version-release-modal.tsx` 与 `web/src/hooks/use-version-check.ts` 已无任何调用方，顶栏移除版本号后用户看不到「有新版本」提示。恢复自动更新时需要一并决定这个入口放在哪里。
+桌面版自动更新已接入 `electron-updater`，入口是菜单「帮助 → 检查更新…」加原生弹窗，不依赖网页组件。网页侧的 `web/src/components/layout/version-release-modal.tsx` 与 `web/src/hooks/use-version-check.ts` 仍无任何调用方，自部署网页版的用户看不到「有新版本」提示，需要决定这个入口放在哪里（或确认网页版不需要）。
 
-## 文档
+## 桌面 Agent 文档
 
-- `canvas-agent/README.md` 仍写着「网页第一次带正确 token 连接后记录 Origin，其他 Origin 不能复用」，但 `cb8bc29` 已移除 token 与来源白名单。桌面版现在通过 `CANVAS_AGENT_ALLOWED_ORIGINS` 限定为固定网页端口，网页版（`npx canvas-agent`）仍不设该变量、CORS 固定 `*`。需要决定网页版怎么处理（多域名部署的 origin 白名单方案，或恢复鉴权），并把 README 改成与现状一致。
+独立 CLI 与外部插件入口已移除，桌面启动、日志及内部 MCP 链路的验收见[待测试](/docs/progress/pending-test)。

@@ -5,6 +5,8 @@ description: 当前版本已实现但仍需人工验证的变更项
 
 # 待测试
 
+- 桌面自动更新：更新源为本仓库 GitHub Releases（`1797127235/infinite-canvas-desktop`）。打包版启动时应静默检查一次更新，离线或 GitHub 不可达时静默跳过、不打扰使用；「帮助 → 检查更新…」手动检查应弹窗给出明确结果（已是最新版本 / 发现新版本并后台下载 / 检查失败原因）。发现新版本后自动后台下载（Windows 走 `.blockmap` 增量下载），完成后弹窗询问「立即重启 / 稍后」，选择立即重启应完成安装且画布数据保留。开发模式（`npm start`）不触发更新检查。打包侧与检查链路已在本地验证（app-update.yml 正确指向自己仓库、latest-linux.yml 正常生成且与磁盘文件名一致、对线上 v0.1.1 的真实检查精确报出「缺 latest-linux.yml」的 404）；剩余需人工验收的是完整下载-重启安装闭环：把 `desktop/package.json` 的 `version` 调低打包安装，再发布更高版本的 Release 走一遍。发布时需把 `release/` 里的安装包、`.blockmap`、`latest.yml` / `latest-linux.yml` 一并传到 Release，缺 yml 文件则老客户端检查不到更新；安装包文件名已去掉空格（`Infinite-Canvas-<版本>-<平台>`），不要再上传旧的带空格命名产物。v0.1.1 及更早的 Release 没有 yml 且未内置更新器，已装这些版本的用户需手动安装一次 v0.1.2，之后的版本才全自动。
+
 - 同一配置节点连续生成：对同一个生成配置节点立即再次生成（手动或助手连发两次）时，上一轮已在上游建好任务的视频结果节点应自动转入静默续询并正常落地成片，不再永远停在「生成中」；用户手动「停止」的节点仍保持空闲，不会被悄悄续跑。
 
 - 视频参考素材按渠道分流：Grok（`grok-imagine-video-1.5` / `-preview`，上游在境外）的参考素材经官方素材网关 `assets.antest.cc.cd` 换成 24 小时临时链接提交，且上传前自动把参考图压缩到 3 MB 内；MiniMax（H3 / H3-Max）与万相 3.0（上游在境内）改为 Base64 直传，参考图同样先压缩到 3 MB 内。三类渠道均应能带参考图正常出片；万相此前自上线即不可用（404），应一并恢复。
@@ -61,16 +63,16 @@ description: 当前版本已实现但仍需人工验证的变更项
 - Agent 消息元数据：发送包含图片附件、Skill 或画布引用的消息后，刷新当前页面、在另一页面恢复同一对话或重启 Canvas Agent，历史消息都应由 Agent 按准确的 `clientMessageId`、`threadId` 和 `turnId` 恢复展示，本地缩略图仍可悬浮或点击查看，不依赖浏览器 IndexedDB 或文本匹配；通信协议版本变化不得清空独立的消息存储，遇到未知版本或损坏清单时应拒绝写入且保留原文件；删除线程后对应缩略图和引用元数据应同时删除，不得按记录数量或文件大小静默裁剪，改动前仅存在于浏览器旧缓存中的消息继续显示普通文本且不尝试迁移。
 - Agent Markdown 样式：右侧 Agent 回复中的代码块应为横向占满消息区域、无语言标题和无双层边框的紧凑代码条，单行内容不应保留纵向大面积空白，复制操作仅在悬停时弱化显示；行内代码、链接在浅色和深色主题下应清晰；点击外部链接后应显示中文紧凑确认弹窗，长路径能够正常换行且复制、继续打开和关闭操作可用；点击 `/Users/`、`/home/` 等本地绝对文件路径时应改为提示在系统文件管理器中定位，支持复制路径，且浏览器地址不应跳转为 localhost 文件路径。
 - Agent 工具确认模式：右侧面板标题栏不应再显示「工具确认」开关；对话输入框左下方应显示确认模式选择，默认选中「自动确认」，画布写入工具应直接执行；切换为「手动确认」后，画布写入工具应在对话中展示等待确认卡片，并支持批准或拒绝。
-- Canvas Agent Codex 升级：启动 Canvas Agent 后应输出 Canvas Agent、内置 Codex 和本机 Codex 版本，实际运行的内置 Codex 应为 0.146.0；内置与本机版本不一致或未安装本机 Codex 时应显示对应升级提醒（Canvas Agent 不查询 npm，版本号只写入日志）；Agent 应能正常连接 Codex、创建或恢复会话、发送消息并调用画布工具，运行中停止任务应只中断当前 turn，随后无需重启 Agent 即可继续发送新任务。
-- Canvas Agent Debug：普通启动应通过公共 logger 输出 Info、Warn 和 Error 日志；使用 `npx -y @basketikun/canvas-agent@latest --debug` 启动后还应输出 Debug 日志并显示日志文件路径，终端统一采用“`YYYY-MM-DD HH:mm:ss` 级别 消息 详情”的纯文本单行格式，`~/.infinite-canvas/logs/` 下应按启动日期生成相同格式的 `canvas-agent-YYYY-MM-DD.log`，同一天多次启动应追加到同一文件；日志中不应出现连接 token 或图片 Data URL 原文。
+- Canvas Agent Codex 升级：桌面程序启动后应输出 Canvas Agent 与内置 Codex 版本，实际运行的内置 Codex 应为 0.146.0；Agent 应能正常创建或恢复会话、发送消息并调用画布工具，运行中停止任务应只中断当前 turn，随后无需重启桌面程序即可继续发送新任务。无参数启动 `canvas-agent` 应拒绝启动，不得再提供独立 HTTP 服务。
+- Canvas Agent 日志统一：普通桌面启动应通过公共 logger 输出 Info、Warn 和 Error；桌面程序以 `--debug` 启动时还应输出 Debug 日志。Canvas Agent、Codex app-server 和本地代理的日志统一追加到 `userData/desktop.log`，使用同一时间格式并脱敏连接 token、API Key 和图片 Data URL；不应再创建 `~/.infinite-canvas/logs/canvas-agent-*.log`。
 - Canvas Agent 凭据脱敏：Codex 与 Claude CLI 的 stderr 包含 Bearer token、`sk-` 密钥、显式 API key/token/authorization 赋值、ANSI 样式或跨输出分片的凭据时，调试日志和网页诊断事件均不应出现明文；普通 stderr 文本应保持不变。
 - Canvas Agent 配置权限：在 Linux 和 macOS 上保存配置后，`~/.infinite-canvas` 权限应为 `0700`，`canvas-agent.json` 权限应为 `0600`，已有的宽松权限也应被纠正；配置应能继续正常读写，Windows 启动不受影响。
 - Canvas Agent URL 自动连接：链接应在 `#` 后传递 `agentUrl` 和 `agentToken`，进入或选择具体画布时继续保留，读取后立即从地址栏移除，并可连接有效的本机、局域网或远程 HTTP(S) Agent 地址且不主动展开设置面板；缺少参数或地址无效时应展开设置并显示错误。
 - 图片 API 模型参数：`gpt-image-*` 的生成和编辑请求不应发送 `response_format`，`dall-e-*` 请求仍应发送 `response_format: "b64_json"`。
 - 图片外链持久化：画布和生图工作台对图片接口返回的远程 URL 应只下载一次，经图片解码校验后保存到 IndexedDB；返回 `200` 但内容不是图片时应失败，下载期间停止画布生成后不得保存或应用结果；浏览器因 CORS 无法读取但图片仍可显示时，应保留原 URL 且不生成空 `storageKey`，插件调用在外链可读取时仍应收到 Data URL。
 - 多参考图编辑：OpenAI 格式在多张参考图时应使用重复的 `image[]` 表单字段提交文件，单张参考图仍使用 `image`；新建的 OpenAI 图片脚本应使用相同字段名。Gemini 渠道和已经保存的自定义脚本不受影响。
-- Canvas Agent Codex 平台依赖：Linux x64 上通过 `npx -y @basketikun/canvas-agent@latest --debug` 首次启动时应自动安装匹配版本的 `@openai/codex-linux-x64`，Codex app-server 能完成初始化并可创建对话；macOS、Windows 和 Linux ARM64 安装不应拉取 Linux x64 二进制。
-- Canvas Agent Codex 日志：Codex app-server 输出带颜色或样式控制符及 UTC 时间的 stderr 时，本地日志和网页诊断日志应只显示一份 `YYYY-MM-DD HH:mm:ss` 本地时间和干净文本，不应出现重复 ISO 时间或 `[2m`、`[31m` 等 ANSI 转义内容。
+- Canvas Agent Codex 平台依赖：桌面程序首次启动时应按当前平台下载匹配版本的 Codex 运行时，Codex app-server 能完成初始化并可创建对话；Windows、Linux x64 和 Linux ARM64 不应互相拉取错误平台的二进制。
+- Canvas Agent Codex 日志：Codex app-server 输出带颜色或样式控制符及 UTC 时间的 stderr 时，`desktop.log` 和网页诊断日志应只显示一份本地时间和干净文本，不应出现重复 ISO 时间或 ANSI 转义内容。
 - Agent HTTP 诊断日志：网页发送一条普通消息后，本地 Debug 日志不应重复输出 `/health`、`/canvas/state`、`/canvas/activate` 成功请求、流式增量或完整会话响应，只保留 HTTP 请求与 Codex 生命周期摘要；右侧「日志」应以单行时间线展示发送、开始、回复、工具、完成用量和错误，不再输出 userMessage started/completed、流式摘要、重复 threadId 或大段原始 JSON。
 - Agent 排查日志：右侧「日志」中的排查视图应显示连接摘要，并可按错误、警告和信息筛选；向下查看日志时仅列表内部滚动，标题、连接状态、筛选数量和操作按钮保持固定；连续相同事件应折叠计数，单条日志可展开查看完整详情；原始 JSON、复制全部、复制最近错误和清空功能应继续可用，浅色与深色主题下均应清晰。
 - Agent 排查日志顺序与跟随：日志应按时间从旧到新排列，进入日志或切换筛选时定位到最新事件；停留底部时自动跟随新日志，展开最后一条后应继续停留在完整详情底部，向上浏览后暂停跟随并显示与对话区视觉高度一致的居中圆形向下箭头，新日志数量只在悬浮提示中显示；列表底部不应出现额外留白，点击按钮后回到底部并恢复跟随。
@@ -151,6 +153,6 @@ Canvas Agent 配置权限
 - Grok 视频与内置 Agnes 视频参考图尺寸：用同一张 3376×6000 的竖图作参考图，Grok（`grok-imagine-video-1.5`）应能正常提交并出片，不再只报 `Request failed with status code 400`；`agnes-video-2.5-flash` 应能正常提交，不再报「输入图边长必须在 256–5760 像素之间」。提交前图片已被等比缩放到 256–5760 px，画面不应出现拉伸变形；上游若仍返回错误，提示里应带出服务端原文而不是只剩状态码。
 
 - 内置万相 3.0 视频模型：C2A 渠道应出现 `wan3.0-video` 与 `wan3.0-video-prime`，只填 API Key 即可提交到 DashScope（`POST /api/v1/services/aigc/video-generation/video-synthesis`）并轮询 `GET /api/v1/tasks/{task_id}`，直到能下载播放。时长应为 2–30 的整数（带参考视频/音频时进一步收紧），清晰度只允许 480p / 720p / 1080p，单条素材不超过 14 MiB，参考图最多 10 张、参考视频/音频最多 5 条且合计 15 秒，首尾帧与参考素材同时出现时应报错。
-- 桌面 Agent 跨域收紧：内置 Canvas Agent 只应答桌面页面来源（`http://127.0.0.1:17370` / `http://localhost:17370`）的跨域请求——带 `Origin: https://evil.example` 的请求不得返回 `Access-Control-Allow-Origin`，同一请求来自桌面来源时应回显该来源并带 `Vary: Origin`；不带 `Origin` 的本机调用（Codex MCP 子进程请求 `/api/tools`）仍须可用。侧边栏助手、画布工具调用和 Skill 草稿经同源 `/agent-api` 代理仍应正常，生图/生视频/文本生成走独立 `canvas-proxy` 不受影响；`CANVAS_DESKTOP_WEB_PORT` 改端口时页面来源与白名单应一起变。网页版 `npx canvas-agent` 不设该变量时保持原有放行。
+- 桌面 Agent 跨域收紧：内置 Canvas Agent 只应答桌面页面来源（`http://127.0.0.1:17370` / `http://localhost:17370`）的跨域请求——带 `Origin: https://evil.example` 的请求不得返回 `Access-Control-Allow-Origin`，同一请求来自桌面来源时应回显该来源并带 `Vary: Origin`；不带 `Origin` 的本机调用（内部 MCP 子进程请求 `/api/tools`）仍须可用。侧边栏助手、画布工具调用和 Skill 草稿经同源 `/agent-api` 代理仍应正常，生图/生视频/文本生成走独立 `canvas-proxy` 不受影响；`CANVAS_DESKTOP_WEB_PORT` 改端口时页面来源与白名单应一起变。
 - 助手面板首次加载：刚进入桌面版时，MCP 初始化完成后输入框应能继续输入，回车和发送按钮应能发出第一条消息，新工作区和恢复上次会话两种情况都要正常；切换会话、新建对话、删除记录和重连之后发送按钮不应卡在加载状态，只能刷新页面才能恢复属于缺陷。
 - 配置向导模型模态：重新完成一次配置后，`codex-home/models.json` 里能看图的模型（grok-4.6 / grok-4.7 / grok-4.7-build-fast / deepseek-v4.1-flash）应带 `"image"`，`context_window`、`supported_reasoning_levels`、`supports_parallel_tool_calls` 不应缺失或只剩 low；助手读取画布参考图时应能正常 `view_image`。读取 models.dev 失败时主进程控制台应留告警，模型能力按纯文本处理属于预期降级。

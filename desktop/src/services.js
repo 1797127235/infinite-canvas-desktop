@@ -3,13 +3,14 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
+const { createInterface } = require("node:readline");
 const { app } = require("electron");
 const tar = require("tar");
 
 const { codexVersion, layout } = require("./paths");
 const { WEB_PORT } = require("./server");
 
-// 桌面版网页从固定端口加载，只允许它自己跨域访问内置 Agent；网页版不设置该变量，保持原有放行。
+// 桌面页面从固定端口加载，内置 Agent 仅接受这些网页来源。
 const ALLOWED_ORIGINS = [`http://127.0.0.1:${WEB_PORT}`, `http://localhost:${WEB_PORT}`].join(",");
 
 /** 只覆盖当前支持的 Windows / Linux 平台；三平台之外直接报错而不是静默失败。 */
@@ -145,15 +146,16 @@ async function ensureCodex(onProgress) {
 }
 
 /** 用 Electron 自带的 Node 跑子进程，用户机器上不需要再装 Node。 */
-function spawnNode(entry, { port, args = [], env = {} } = {}) {
+function spawnNode(entry, { port, args = [], env = {}, shutdownCommand = false } = {}) {
     const child = spawn(process.execPath, [entry, ...args], {
         env: { ...process.env, ...env, ...(port ? { PORT: String(port) } : {}), ELECTRON_RUN_AS_NODE: "1" },
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [shutdownCommand ? "pipe" : "ignore", "pipe", "pipe"],
         windowsHide: true,
     });
+    if (shutdownCommand) child.shutdownCommand = true;
     children.push(child);
-    child.stdout?.on("data", (chunk) => log(chunk.toString()));
-    child.stderr?.on("data", (chunk) => log(chunk.toString()));
+    if (child.stdout) createInterface({ input: child.stdout }).on("line", log);
+    if (child.stderr) createInterface({ input: child.stderr }).on("line", log);
     return child;
 }
 
@@ -172,7 +174,7 @@ async function startAgent(codexBin, onProgress, env = {}) {
     if (!fs.existsSync(agentEntry)) throw new Error("安装包缺少 Canvas Agent 产物，请先执行 npm run resources");
     onProgress?.({ phase: "agent", received: 0, total: 0 });
     const port = await freePort();
-    spawnNode(agentEntry, { port, env: { CANVAS_CODEX_BIN: codexBin, NO_COLOR: "1", CANVAS_AGENT_ALLOWED_ORIGINS: ALLOWED_ORIGINS, ...env } });
+    spawnNode(agentEntry, { port, args: ["desktop", ...(process.argv.includes("--debug") ? ["--debug"] : [])], shutdownCommand: true, env: { CANVAS_CODEX_BIN: codexBin, NO_COLOR: "1", CANVAS_AGENT_ALLOWED_ORIGINS: ALLOWED_ORIGINS, ...env } });
     await waitFor(`http://127.0.0.1:${port}/health`, 90_000);
     return port;
 }
@@ -188,12 +190,14 @@ async function startProxy(onProgress) {
     return port;
 }
 
-function stopChildren() {
-    for (const child of children) {
-        if (child.killed || child.exitCode !== null) continue;
-        if (process.platform === "win32" && child.pid) spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true });
+async function stopChildren() {
+    await Promise.all(children.map((child) => new Promise((resolve) => {
+        if (child.exitCode !== null) return resolve();
+        child.once("exit", resolve);
+        if (child.shutdownCommand) child.stdin?.write("shutdown\n");
+        else if (process.platform === "win32" && child.pid) spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true });
         else child.kill();
-    }
+    })));
     children.length = 0;
 }
 

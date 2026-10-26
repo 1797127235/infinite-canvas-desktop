@@ -90,7 +90,7 @@ export async function interruptCodexTurn(threadId?: string) {
 
 /** 回复当前 app-server 的待处理权限请求。 */
 export async function resolveCodexApproval(requestId: string, decision: string) {
-    return Boolean(codexApp?.resolveApproval(requestId, decision));
+    return (await codexApp?.resolveApproval(requestId, decision)) ?? false;
 }
 
 /** 创建新的 Codex 线程并记录当前线程 ID。 */

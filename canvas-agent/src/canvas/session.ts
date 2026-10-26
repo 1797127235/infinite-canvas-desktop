@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { ServerResponse } from "node:http";
 
+import type { AuditLog } from "../agent/audit-log.js";
 import type { AgentAttachment } from "../agent/types.js";
 import { logger } from "../utils/logger.js";
 import { buildCanvasToolRequest, fitAttachmentNodeSize } from "./operations.js";
@@ -8,7 +9,11 @@ import type { ToolName } from "./schemas.js";
 import { compactCanvasState, compactNode, isToolName, nextCanvasX, parseToolInput } from "./tools.js";
 import type { CanvasSnapshot } from "./types.js";
 
-type PendingRequest = { clientId: string; resolve: (value: unknown) => void; reject: (error: Error) => void };
+type ToolAuditScope = { name: string; input: unknown; threadId: string; turnId: string; clientId: string; requestId: string };
+type PendingRequest = ToolAuditScope & { startedAt: number; timer: ReturnType<typeof setTimeout>; resolve: (value: unknown) => void; reject: (error: Error) => void };
+type AuditRecord = Parameters<Pick<AuditLog, "record">["record"]>[0];
+class AuditWriteError extends Error {}
+class AuditedToolError extends Error {}
 type TurnAttachment = { clientId: string; id: string; name: string; type: string; size: number; width: number; height: number; dataUrl: string };
 type ReplayEvent = { type: string; payload: Record<string, unknown> };
 export type CodexState = { busy: boolean; threadId: string; turnId: string };
@@ -57,7 +62,11 @@ export class CanvasSession {
     private conversationInventoryComplete = false;
     private preparedConversationThreadId = "";
 
-    constructor(activeThreadId = "") {
+    constructor(
+        activeThreadId = "",
+        private readonly audit: Pick<AuditLog, "record"> | null = null,
+        private readonly onAuditFailure?: (error: Error) => void,
+    ) {
         this.conversationState = {
             revision: 1,
             conversationId: activeThreadId || crypto.randomUUID(),
@@ -280,6 +289,7 @@ export class CanvasSession {
             }
         }
         sendEvent(res, "hello", { ok: true, protocolVersion: AGENT_PROTOCOL_VERSION, clientId, workspace: { activeThreadId }, conversation: this.conversationStateSnapshot, codex: this.codexState, pendingApprovals: this.codexPendingApprovals });
+        void this.recordAudit({ eventType: "sse.connected", threadId: this.codexState.threadId || undefined, turnId: this.codexState.turnId || undefined, clientId, status: "connected", payload: { statusOnly } }).catch((error) => logger.error("Audit log write failed for SSE connection", { error, clientId }));
         if (!statusOnly && activeThreadId && this.codexState.threadId === activeThreadId) this.codexReplayEvents.forEach((event) => sendEvent(res, event.type, event.payload));
         const timer = setInterval(() => sendEvent(res, "ping", { time: Date.now() }), 15000);
         res.on("close", () => {
@@ -289,10 +299,9 @@ export class CanvasSession {
             this.clients.delete(clientId);
             this.clientFocusOrder.delete(clientId);
             this.canvasStates.delete(clientId);
-            this.pending.forEach((item, requestId) => {
-                if (item.clientId !== clientId) return;
-                this.pending.delete(requestId);
-                item.reject(new Error("请求页面已断开"));
+            void this.recordAudit({ eventType: "sse.disconnected", threadId: this.codexState.threadId || undefined, turnId: this.codexState.turnId || undefined, clientId, status: "disconnected", payload: { statusOnly } }).catch((error) => logger.error("Audit log write failed for SSE disconnection", { error, clientId }));
+            this.pending.forEach((item) => {
+                if (item.clientId === clientId) void this.finishPending(item, new Error("请求页面已断开"));
             });
             if (this.activeClientId === clientId) this.activeClientId = [...this.clients.keys()].sort((a, b) => (this.clientFocusOrder.get(b) || 0) - (this.clientFocusOrder.get(a) || 0))[0] || "";
         });
@@ -372,12 +381,24 @@ export class CanvasSession {
     }
 
     /** 接收网页返回的工具调用结果。 */
-    resolveResult(clientId: string, body: { requestId?: string; error?: string; result?: unknown }) {
+    async resolveResult(clientId: string, body: { requestId?: string; error?: string; result?: unknown }) {
         const item = body.requestId ? this.pending.get(body.requestId) : null;
-        if (!item || !body.requestId || item.clientId !== clientId) return false;
+        if (!item || !body.requestId) return false;
+        if (item.clientId !== clientId) {
+            await this.recordToolAudit({ ...item, clientId }, "tool_call.rejected", "rejected", { error: "工具结果来源客户端不匹配", rejectedClientId: clientId });
+            return false;
+        }
         this.pending.delete(body.requestId);
+        clearTimeout(item.timer);
         logger.debug("Canvas tool result received", { clientId, requestId: body.requestId, error: body.error, result: body.result });
-        body.error ? item.reject(new Error(body.error)) : item.resolve(body.result);
+        try {
+            if (this.audit) await this.recordToolAudit(item, body.error ? "tool_call.failed" : "tool_call.completed", body.error ? "failed" : "completed", body.error ? { error: body.error } : { result: body.result });
+        } catch (error) {
+            item.reject(error instanceof Error ? error : new Error(String(error)));
+            throw error;
+        }
+        if (body.error) item.reject(new AuditedToolError(body.error));
+        else item.resolve(body.result);
         return true;
     }
 
@@ -438,32 +459,58 @@ export class CanvasSession {
 
     /** 校验工具参数并将调用分派到当前目标网页。 */
     async callTool(name: unknown, rawInput: unknown) {
-        if (!isToolName(name)) throw new Error(`未知工具：${String(name)}`);
-        logger.info("MCP tool called", { name, input: rawInput, targetClientId: this.targetClientId });
-        const input = parseToolInput(name, rawInput) as Record<string, unknown>;
-        if (SITE_TOOLS.has(name)) {
-            if (!this.clients.size) throw new Error("当前没有已连接网页");
-            return await this.requestCanvasTool(name, input);
+        const requestId = crypto.randomUUID();
+        const clientId = this.targetClientId;
+        const threadId = this.codexState.threadId;
+        const turnId = this.codexState.turnId;
+        logger.info("MCP tool called", { name, input: rawInput, targetClientId: clientId });
+        let input: Record<string, unknown>;
+        try {
+            if (!isToolName(name)) throw new Error(`未知工具：${String(name)}`);
+            input = parseToolInput(name, rawInput) as Record<string, unknown>;
+        } catch (error) {
+            const scope: ToolAuditScope = { name: String(name), input: rawInput, threadId, turnId, clientId, requestId };
+            await this.recordToolAudit(scope, "tool_call.rejected", "rejected", { error: errorText(error) });
+            throw error;
         }
-        const readTool = ["canvas_get_state", "canvas_get_selection", "canvas_export_snapshot"].includes(name);
-        if (readTool && (!this.clients.size || !this.canvasState)) throw new Error("当前没有已连接画布");
-        if (name === "canvas_get_state" || name === "canvas_export_snapshot") return compactCanvasState(this.canvasState);
-        if (name === "canvas_get_selection") {
-            const ids = new Set(this.canvasState?.selectedNodeIds || []);
-            return { nodes: (this.canvasState?.nodes || []).filter((node) => ids.has(node.id)).map(compactNode) };
+        const scope: ToolAuditScope = { name, input, threadId, turnId, clientId, requestId };
+        if (this.audit) await this.recordToolAudit(scope, "tool_call.started", "started");
+        try {
+            const readTool = ["canvas_get_state", "canvas_get_selection", "canvas_export_snapshot"].includes(name);
+            const state = this.canvasStateForClient(clientId);
+            if (SITE_TOOLS.has(name)) return await this.requestCanvasTool(name, input, scope, this.clients.get(clientId));
+            if (readTool && (!this.clients.size || !state)) throw new Error("当前没有已连接画布");
+            if (name === "canvas_get_state" || name === "canvas_export_snapshot") {
+                const result = compactCanvasState(state);
+                if (this.audit) await this.recordToolAudit(scope, "tool_call.completed", "completed", { result });
+                return result;
+            }
+            if (name === "canvas_get_selection") {
+                const ids = new Set(state?.selectedNodeIds || []);
+                const result = { nodes: (state?.nodes || []).filter((node) => ids.has(node.id)).map(compactNode) };
+                if (this.audit) await this.recordToolAudit(scope, "tool_call.completed", "completed", { result });
+                return result;
+            }
+            if (name === "canvas_create_attachment_nodes") {
+                const result = await this.createAttachmentNodes(input as { attachmentIds: string[]; x?: number; y?: number; gap?: number; direction?: "row" | "column" }, scope, state);
+                return result;
+            }
+            if (!this.clients.size) throw new Error("当前没有已连接画布");
+            const request = buildCanvasToolRequest(name, input, state);
+            return await this.requestCanvasTool(request.name, request.input, scope, this.clients.get(clientId));
+        } catch (error) {
+            if (error instanceof AuditedToolError || error instanceof AuditWriteError) throw error;
+            await this.recordToolAudit(scope, "tool_call.failed", "failed", { error: errorText(error) });
+            throw error;
         }
-        if (name === "canvas_create_attachment_nodes") return await this.createAttachmentNodes(input as { attachmentIds: string[]; x?: number; y?: number; gap?: number; direction?: "row" | "column" });
-        if (!this.clients.size) throw new Error("当前没有已连接画布");
-        const request = buildCanvasToolRequest(name, input, this.canvasState);
-        return await this.requestCanvasTool(request.name, request.input);
     }
 
     /** 将当前 turn 的附件转换为画布图片节点。 */
-    private async createAttachmentNodes(input: { attachmentIds: string[]; x?: number; y?: number; gap?: number; direction?: "row" | "column" }) {
-        const clientId = this.targetClientId;
+    private async createAttachmentNodes(input: { attachmentIds: string[]; x?: number; y?: number; gap?: number; direction?: "row" | "column" }, scope: ToolAuditScope, state: CanvasSnapshot | null) {
+        const clientId = scope.clientId;
         if (!this.clients.has(clientId)) throw new Error("当前没有已连接画布");
         const attachments = input.attachmentIds.map((id) => this.getTurnAttachment(clientId, id));
-        const x = Number(input.x ?? nextCanvasX(this.canvasState));
+        const x = Number(input.x ?? nextCanvasX(state));
         const y = Number(input.y ?? 0);
         const gap = Number(input.gap ?? 40);
         const direction = input.direction || "row";
@@ -481,26 +528,92 @@ export class CanvasSession {
             offset += (direction === "row" ? size.width : size.height) + gap;
             return node;
         });
-        await this.requestCanvasTool("canvas_create_attachment_nodes", { nodes });
-        return { nodes: nodes.map(({ id, attachmentId, title }) => ({ id, attachmentId, title })) };
+        await this.requestCanvasTool("canvas_create_attachment_nodes", { nodes }, scope, this.clients.get(clientId));
+        const result = { nodes: nodes.map(({ id, attachmentId, title }) => ({ id, attachmentId, title })) };
+        return result;
     }
 
     /** 向目标网页发送工具请求并等待调用结果。 */
-    private async requestCanvasTool(name: ToolName, input: Record<string, unknown>) {
-        const requestId = crypto.randomUUID();
-        const clientId = this.targetClientId;
-        const client = this.clients.get(clientId);
-        if (!client) throw new Error("当前没有已连接画布");
-        sendEvent(client, "tool_call", { requestId, name, input });
-        logger.debug("Canvas tool request sent", { requestId, name, input, clientId });
+    private async requestCanvasTool(name: ToolName, input: Record<string, unknown>, scope: ToolAuditScope, client?: ServerResponse) {
+        if (!client) {
+            const error = new Error("当前没有已连接画布");
+            if (this.audit) await this.recordToolAudit(scope, "tool_call.failed", "failed", { error: error.message });
+            throw new AuditedToolError(error.message);
+        }
+        try {
+            if (this.audit) await this.recordToolAudit(scope, "tool_call.dispatched", "dispatched", { name, input });
+            if (this.clients.get(scope.clientId) !== client) throw new Error("目标网页已变化");
+        } catch (error) {
+            if (error instanceof AuditWriteError) throw error;
+            if (this.audit) await this.recordToolAudit(scope, "tool_call.failed", "failed", { error: errorText(error) });
+            throw new AuditedToolError(errorText(error));
+        }
         return await new Promise((resolve, reject) => {
             const timer = setTimeout(() => {
-                this.pending.delete(requestId);
-                logger.warn("Canvas tool request timed out", { requestId, name, clientId });
-                reject(new Error("画布操作超时"));
+                const item = this.pending.get(scope.requestId);
+                if (item) void this.finishPending(item, new Error("画布操作超时"));
             }, 30000);
-            this.pending.set(requestId, { clientId, resolve: (value) => (clearTimeout(timer), resolve(value)), reject: (error) => (clearTimeout(timer), reject(error)) });
+            const item: PendingRequest = {
+                name: scope.name,
+                input: scope.input,
+                threadId: scope.threadId,
+                turnId: scope.turnId,
+                clientId: scope.clientId,
+                requestId: scope.requestId,
+                startedAt: Date.now(),
+                timer,
+                resolve,
+                reject,
+            };
+            this.pending.set(scope.requestId, item);
+            try {
+                sendEvent(client, "tool_call", { requestId: scope.requestId, name, input });
+                logger.debug("Canvas tool request sent", { requestId: scope.requestId, name, input, clientId: scope.clientId });
+            } catch (error) {
+                void this.finishPending(item, error instanceof Error ? error : new Error(String(error)));
+            }
         });
+    }
+
+    private async finishPending(item: PendingRequest, error: Error) {
+        if (this.pending.get(item.requestId) !== item) return;
+        this.pending.delete(item.requestId);
+        clearTimeout(item.timer);
+        try {
+            await this.recordToolAudit(item, "tool_call.failed", "failed", { error: error.message });
+        } catch (auditError) {
+            item.reject(auditError instanceof Error ? auditError : new Error(String(auditError)));
+            return;
+        }
+        item.reject(new AuditedToolError(error.message));
+    }
+
+    private async recordToolAudit(scope: ToolAuditScope, eventType: string, status: string, details: Record<string, unknown> = {}) {
+        return this.recordAudit({
+            eventType,
+            threadId: scope.threadId || undefined,
+            turnId: scope.turnId || undefined,
+            clientId: scope.clientId || undefined,
+            requestId: scope.requestId,
+            status,
+            payload: { name: scope.name, input: scope.input, ...details },
+        });
+    }
+
+    private async recordAudit(input: AuditRecord) {
+        if (!this.audit) return;
+        try {
+            await this.audit.record(input);
+        } catch (error) {
+            const failure = error instanceof AuditWriteError ? error : new AuditWriteError(errorText(error));
+            logger.error("Audit log write failed", { error: failure, requestId: input.requestId });
+            try {
+                this.onAuditFailure?.(failure);
+            } catch (callbackError) {
+                logger.error("Audit failure callback failed", { error: callbackError });
+            }
+            throw failure;
+        }
     }
 }
 
@@ -523,6 +636,10 @@ function codexReplayKey(type: string, payload: Record<string, unknown>) {
     if (eventType === "usage.updated") return `usage:${turnId}`;
     if (eventType === "turn.completed" || eventType === "error") return `${eventType}:${turnId}`;
     return "";
+}
+
+function errorText(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
 }
 
 function recordValue(value: unknown) {

@@ -1,13 +1,13 @@
 # Infinite Canvas Desktop
 
-Windows / Linux 桌面版。目标是把网页版需要用户自己做的事全部内置：不需要装 Node、不需要敲 `npx`、不需要填 Agent 地址和 token、不需要自己开本地代理。
+Windows / Linux 桌面版。Canvas Agent 仅作为桌面内部组件运行，不再提供独立 npm CLI；用户无需安装 Node、填写 Agent 地址或自己启动代理。
 
 ## 桌面壳内置了什么
 
 | 能力 | 网页版 | 桌面版 |
 | --- | --- | --- |
 | 网页产物 | 自己部署静态站点 | 打包进安装包，由主进程用同源本地服务托管 |
-| Canvas Agent | `npx @basketikun/canvas-agent@latest` + 填地址 token | 主进程直接拉起，地址由壳注入 |
+| Canvas Agent | 不再提供独立 CLI 接入 | 主进程以 `desktop` 模式拉起，地址由壳注入 |
 | Codex 运行时 | 用户自己 `npm i -g @openai/codex` | 首次启动下载到用户数据目录，之后复用 |
 | 本地代理 | `npx @basketikun/canvas-proxy@latest` | 主进程直接拉起，网页自动启用 |
 | 跨域 | 需要代理或直连 | Agent 走同源反代（`/agent-api`），AI 接口走内置代理 |
@@ -38,6 +38,16 @@ npm run dist         # 两个平台一起打
 ```
 
 产物在 `desktop/release/`。
+
+### 自动更新
+
+更新源是本仓库（`1797127235/infinite-canvas-desktop`）的 GitHub Releases，由 `electron-builder.yml` 的 `publish` 显式声明——fork 的 `homepage` 指向 upstream，不显式声明 electron-updater 会按 package.json 找错仓库。发布新版本时把 `release/` 里的安装包、`.blockmap` 与 `latest.yml`（Windows）/ `latest-linux.yml`（Linux）一并传到对应版本的 Release，已安装的客户端即可收到更新；也可以交给 electron-builder 直接发布草稿：
+
+```bash
+GH_TOKEN=<github token> npm run dist -- --publish always
+```
+
+运行期行为：仅打包后启用；启动时静默检查一次，离线或 GitHub 不可达时静默跳过；「帮助 → 检查更新…」可手动检查并弹窗反馈结果。发现新版本自动后台下载（Windows 走 `.blockmap` 增量下载），完成后弹窗询问重启安装，更新覆盖整个安装包（网页产物、Canvas Agent、本地代理一起更新）。安装包文件名不能带空格：electron-builder 写进 latest.yml 时把空格换成 `-`，GitHub 存资产名时把空格换成 `.`，两边对不上下载就 404（已实测），`artifactName` 已改用无空格命名，发布时不要再上传旧的带空格产物。安装包未签名，Windows 更新可能弹 SmartScreen 警告。`deb` 包自动更新需要系统授权，Linux 用户建议使用 AppImage。
 
 ### 应用图标
 
@@ -78,6 +88,15 @@ npmmirror 只做缓存转发，不重新打包，所以内容与官方逐字节�
 Electron 本体走 `electronDownload.mirror` 指向的 npmmirror 镜像，同样只缓存官方产物。
 
 只支持 Windows x64 与 Linux x64 / arm64；其它平台启动会明确报错。
+
+## 日志
+
+桌面壳是唯一文件日志出口，Agent、Codex app-server 和代理的子进程输出统一收集到 `userData/desktop.log`：
+
+- Windows：`%APPDATA%\Infinite Canvas\desktop.log`
+- Linux：通常为 `~/.config/Infinite Canvas/desktop.log`
+
+需要详细日志时给桌面程序传入 `--debug`，开发时用 `npm start -- --debug`；详情仍写入同一个文件。Agent 不再单独创建按日期命名的日志，也不会自动删除以前的日志文件。`~/.infinite-canvas/` 中的会话、附件和 Skill 数据不受影响。
 
 ## 运行期行为与边界值
 

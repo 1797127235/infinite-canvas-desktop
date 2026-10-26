@@ -1,8 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { auditLog, type AuditLog, type AuditEventInput } from "./audit-log.js";
 import { createAgentLogWriter } from "../utils/agent-runtime.js";
 import { VERSION } from "../config.js";
 import { logger } from "../utils/logger.js";
@@ -20,7 +21,6 @@ type ApprovalRequest = { id: number; method: string; params: JsonRecord; decisio
 type PendingTurnStart = { threadId: string; prompt: string; messageText?: string; turnId?: string; onTurn?: (turnId: string) => void };
 
 const canvasAgentMcp = canvasAgentMcpCommand();
-const require = createRequire(import.meta.url);
 const STREAM_UPDATE_INTERVAL_MS = 40;
 const supplementalItemTypes = new Set(["agent_message", "reasoning", "plan", "mcp_tool_call", "command_execution", "file_change", "dynamic_tool_call", "collab_tool_call", "web_search", "image_view", "image_generation", "context_compaction"]);
 const SKILL_DRAFT_INSTRUCTIONS = "你只负责根据已提供的对话或画布快照生成可编辑的 Codex Skill 草稿。不要调用任何工具，不要执行命令，不要读取文件，不要访问网络，不要修改任何状态。严格按 outputSchema 返回结果，并排除凭证、密钥、Token、本地路径、临时错误、调试日志和一次性结果。";
@@ -63,17 +63,18 @@ export class CodexAppClient {
     private failureMessage = "";
 
     /** 保存 app-server 子进程和事件出口。 */
-    private constructor(private child: ChildProcess, private emit: AgentEmit, private eventHistory: Pick<CodexEventHistory, "record" | "recordTurn"> = codexEventHistory) {}
+    private inputQueue: Promise<void> = Promise.resolve();
+    private auditFailure = false;
+
+    private constructor(private child: ChildProcess, private emit: AgentEmit, private eventHistory: Pick<CodexEventHistory, "record" | "recordTurn"> = codexEventHistory, private audit: Pick<AuditLog, "record"> | null = null) {}
 
     /** 启动并初始化 Codex app-server。 */
     static async start(emit: AgentEmit, onExit: () => void) {
-        // The desktop shell ships its own Codex runtime and points here, so a local npm install is never required.
-        const externalBin = process.env.CANVAS_CODEX_BIN?.trim() || "";
-        logger.info("Starting Codex app-server", { executable: process.execPath, codex: externalBin || codexBin() });
-        const child = externalBin
-            ? spawn(externalBin, ["app-server", "--stdio"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true })
-            : spawn(process.execPath, [codexBin(), "app-server", "--stdio"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
-        const client = new CodexAppClient(child, emit);
+        const binary = process.env.CANVAS_CODEX_BIN?.trim();
+        if (!binary) throw new Error("缺少桌面提供的 Codex 运行时，请从 Infinite Canvas 桌面程序启动。");
+        logger.info("Starting Codex app-server", { codex: binary });
+        const child = spawn(binary, ["app-server", "--stdio"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+        const client = new CodexAppClient(child, emit, codexEventHistory, auditLog);
         let stopped = false;
         const stop = () => {
             if (stopped) return;
@@ -104,7 +105,7 @@ export class CodexAppClient {
             emit("agent_log", { text: `Codex app-server exited: ${code ?? 0}` });
         });
         await client.request("initialize", { clientInfo: { name: "canvas-agent", title: "Infinite Canvas Agent", version: VERSION }, capabilities: { experimentalApi: true, requestAttestation: false } });
-        client.notify("initialized");
+        await client.notify("initialized");
         return client;
     }
 
@@ -287,10 +288,12 @@ export class CodexAppClient {
     }
 
     /** 回复网页端已经确认的 Codex 权限请求。 */
-    resolveApproval(requestId: string, decision: string) {
+    async resolveApproval(requestId: string, decision: string) {
         const request = this.approvalRequests.get(requestId);
         if (!request) return false;
         if (request.decision) return true;
+        const scope = codexEventScope(request.params);
+        await this.audit?.record({ eventType: "approval.decided", threadId: scope.thread_id || undefined, turnId: scope.turn_id || undefined, requestId, status: decision, payload: { method: request.method, decision, params: request.params } });
         request.decision = decision;
         const permissions = field(request.params, "permissions") || field(request.params, "requestedPermissions");
         const accepted = decision === "accept" || decision === "acceptForSession";
@@ -318,15 +321,20 @@ export class CodexAppClient {
     }
 
     /** 发送 JSON-RPC 请求并保存待处理 Promise。 */
-    private request<Method extends CodexRequestMethod>(method: Method, params: CodexRequestParams<Method>, silent = false) {
-        if (this.failing) return Promise.reject(new CodexReportedError(this.failureMessage || "Codex app-server 已停止")) as Promise<CodexRequestResult<Method>>;
+    private async request<Method extends CodexRequestMethod>(method: Method, params: CodexRequestParams<Method>, silent = false) {
+        if (this.failing) throw new CodexReportedError(this.failureMessage || "Codex app-server 已停止");
         const id = this.nextId++;
+        if (this.audit && !silent) {
+            const auditEvent = this.protocolAudit("codex.sent", { id, method, params });
+            if (auditEvent) await this.audit.record(auditEvent);
+        }
         this.write({ id, method, params }, silent);
-        return new Promise<CodexRequestResult<Method>>((resolve, reject) => this.pending.set(id, { resolve: (result) => resolve(result as CodexRequestResult<Method>), reject, silent }));
+        return await new Promise<CodexRequestResult<Method>>((resolve, reject) => this.pending.set(id, { resolve: (result) => resolve(result as CodexRequestResult<Method>), reject, silent }));
     }
 
     /** 发送无需响应的 JSON-RPC 通知。 */
-    private notify(method: string, params?: unknown) {
+    private async notify(method: string, params?: unknown) {
+        if (this.audit) await this.audit.record({ eventType: "codex.sent", payload: params === undefined ? { method } : { method, params } });
         this.write(params === undefined ? { method } : { method, params });
     }
 
@@ -344,14 +352,17 @@ export class CodexAppClient {
         const lines = this.buffer.split(/\r?\n/);
         this.buffer = lines.pop() || "";
         lines.filter(Boolean).forEach((line) => {
-            try {
-                this.handle(JSON.parse(line) as JsonRecord);
-            } catch (error) {
-                if (!this.skillDraftActive) {
-                    logger.warn("Invalid Codex app-server output", { error, line });
-                    this.emit("agent_log", { text: line });
+            this.inputQueue = this.inputQueue.then(async () => {
+                try {
+                    if (this.failing) return;
+                    const message = JSON.parse(line) as JsonRecord;
+                    const auditEvent = this.protocolAudit("codex.received", message);
+                    if (auditEvent) await this.audit?.record(auditEvent);
+                    this.handle(message);
+                } catch (error) {
+                    this.stopForAuditFailure(error);
                 }
-            }
+            });
         });
     }
 
@@ -388,6 +399,8 @@ export class CodexAppClient {
             return;
         }
         if (method === "mcpServer/startupStatus/updated") {
+            // SAFETY: app-server selects this notification method, so params matches its protocol shape.
+            // SAFETY: app-server selects this notification method, so params matches its protocol shape.
             const value = params as unknown as CodexNotificationParams<"mcpServer/startupStatus/updated">;
             const threadId = value.threadId || this.currentThreadId;
             this.emit("agent_bootstrap", {
@@ -413,19 +426,36 @@ export class CodexAppClient {
             params = { ...params, ...(threadId ? { threadId } : {}), ...(turnId ? { turnId } : {}) };
         }
         if (method === "item/agentMessage/delta") {
+            // SAFETY: app-server selects this notification method, so params matches its protocol shape.
             const value = params as unknown as CodexNotificationParams<"item/agentMessage/delta">;
             return this.emitDelta("agent_message", value);
         }
-        if (method === "item/plan/delta") return this.emitDelta("plan", params as unknown as CodexNotificationParams<"item/plan/delta">);
-        if (method === "item/reasoning/summaryTextDelta") return this.emitDelta("reasoning", params as unknown as CodexNotificationParams<"item/reasoning/summaryTextDelta">);
-        if (method === "item/commandExecution/outputDelta") return this.emitDelta("command_execution", params as unknown as CodexNotificationParams<"item/commandExecution/outputDelta">);
+        if (method === "item/plan/delta") {
+            // SAFETY: app-server selects this notification method, so params matches its protocol shape.
+            const value = params as unknown as CodexNotificationParams<"item/plan/delta">;
+            return this.emitDelta("plan", value);
+        }
+        if (method === "item/reasoning/summaryTextDelta") {
+            // SAFETY: app-server selects this notification method, so params matches its protocol shape.
+            const value = params as unknown as CodexNotificationParams<"item/reasoning/summaryTextDelta">;
+            return this.emitDelta("reasoning", value);
+        }
+        if (method === "item/commandExecution/outputDelta") {
+            // SAFETY: app-server selects this notification method, so params matches its protocol shape.
+            const value = params as unknown as CodexNotificationParams<"item/commandExecution/outputDelta">;
+            return this.emitDelta("command_execution", value);
+        }
         if (method === "turn/plan/updated") {
+            // SAFETY: app-server selects this notification method, so params matches its protocol shape.
             const value = params as unknown as CodexNotificationParams<"turn/plan/updated">;
             const update: CodexPlanUpdate = { ...value, threadId: value.threadId || "" };
             if (update.threadId && update.turnId) this.plansByTurn.set(turnCacheKey(update.threadId, update.turnId), update);
+            // SAFETY: CodexPlanUpdate is a JsonRecord-compatible protocol object.
             params = update as unknown as JsonRecord;
         }
         if (method === "thread/tokenUsage/updated") {
+            // SAFETY: app-server selects this notification method, so params matches its protocol shape.
+            // SAFETY: app-server selects this notification method, so params matches its protocol shape.
             this.lastUsage = normalizeUsage(params as unknown as CodexNotificationParams<"thread/tokenUsage/updated">);
             this.emit("agent_event", { agent: "codex", type: "usage.updated", usage: this.lastUsage, ...codexEventScope(params) });
             return;
@@ -545,6 +575,7 @@ export class CodexAppClient {
             return true;
         }
         if (method !== "turn/completed") return true;
+        // SAFETY: this branch handles only a normalized silent turn/completed notification.
         const turn = field(params, "turn") as CodexNotificationParams<"turn/completed">["turn"];
         const completedTurnId = String(field(turn, "id") || turnId);
         const turnKey = turnCacheKey(threadId, completedTurnId);
@@ -556,7 +587,8 @@ export class CodexAppClient {
         const result = { output };
         if (pending) {
             this.activeTurns.delete(turnKey);
-            failure ? pending.reject(failure) : pending.resolve(result);
+            if (failure) pending.reject(failure);
+            else pending.resolve(result);
         } else if (completedTurnId) {
             this.completedTurns.set(turnKey, failure);
             this.completedTurnResults.set(turnKey, result);
@@ -571,11 +603,12 @@ export class CodexAppClient {
     /** 请求响应确定静默线程 ID 后，重新分流早到的启动通知。 */
     private flushPendingThreadStartedNotifications() {
         const notifications = this.pendingThreadStartedNotifications.splice(0);
-        notifications.forEach((params) => this.handleNotification("thread/started", params));
+        notifications.forEach((params) => void this.handleNotification("thread/started", params));
     }
 
     /** 补充历史落盘后再广播 turn 终态，确保界面完成状态可跨 Agent 重启恢复。 */
     private completeTurn(event: AgentEvent, params: JsonRecord, eventScope: ReturnType<typeof codexEventScope>) {
+        // SAFETY: completeTurn is called only for a normalized turn/completed notification.
         const turn = (params as unknown as CodexNotificationParams<"turn/completed">).turn;
         const turnId = turn.id;
         const turnKey = turnCacheKey(String(field(params, "threadId") || field(event, "thread_id") || ""), turnId);
@@ -586,7 +619,8 @@ export class CodexAppClient {
         const failure = error ? new CodexReportedError(error.message || "Codex turn failed") : null;
         if (pending) {
             this.activeTurns.delete(turnKey);
-            failure ? pending.reject(failure) : pending.resolve(event);
+            if (failure) pending.reject(failure);
+            else pending.resolve(event);
         } else if (turnId) {
             this.completedTurns.set(turnKey, failure);
         }
@@ -595,6 +629,37 @@ export class CodexAppClient {
             this.currentTurnId = "";
         }
         this.emit("agent_done", { agent: "codex", usage: event.usage, ...eventScope });
+    }
+
+    /** 审计不可用时直接终止 app-server，避免未记录的后续工具继续执行。 */
+    stopForAuditFailure(error: unknown) {
+        if (this.auditFailure) return;
+        this.auditFailure = true;
+        const message = "审计记录失败，本轮无法保证记录完整，已停止助手。请检查日志目录后重启应用。";
+        logger.error(message, { error });
+        this.emit("audit_status", { failed: true, error: message });
+        this.emit("agent_error", { message, threadId: this.currentThreadId, turnId: this.currentTurnId });
+        this.child.kill();
+        this.failAll(message, true);
+    }
+
+    private protocolAudit(eventType: string, message: JsonRecord): AuditEventInput | null {
+        const params = field(message, "params") || field(message, "result") || {};
+        const messageMethod = String(message.method || "");
+        const notifiedThreadId = String(field(params, "threadId") || field(field(params, "thread"), "id") || "");
+        if (notifiedThreadId && this.silentThreadIds.has(notifiedThreadId)) return null;
+        if (messageMethod === "thread/started" && this.pendingSilentThreadStarts.size) return null;
+        const threadId = String(field(params, "threadId") || field(field(params, "thread"), "id") || this.currentThreadId || "");
+        const turnId = String(field(params, "turnId") || field(field(params, "turn"), "id") || this.currentTurnId || "");
+        const itemId = String(field(params, "itemId") || field(field(params, "item"), "id") || "");
+        let payload = message;
+        // 跨传输分片的凭据必须在完整上下文中脱敏，不能各自记录裸 delta。
+        if (typeof field(params, "delta") === "string") {
+            const delta = String(field(params, "delta"));
+            const { delta: _delta, ...rest } = params as JsonRecord;
+            payload = { ...message, params: { ...rest, deltaDigest: { sha256: createHash("sha256").update(delta).digest("hex"), length: delta.length } } };
+        }
+        return { eventType, threadId: threadId || undefined, turnId: turnId || undefined, itemId: itemId || undefined, requestId: message.id === undefined ? undefined : String(message.id), payload };
     }
 
     /** 合并并广播 Agent 文本或执行输出增量。 */
@@ -623,7 +688,10 @@ export class CodexAppClient {
         if (!pending) return;
         clearTimeout(pending.timer);
         this.pendingDeltas.delete(key);
-        if (pending.delta) this.emit("agent_event", { agent: "codex", type: "item.updated", item: { id: pending.params.itemId, type: pending.itemType, delta: pending.delta }, ...codexEventScope(pending.params as unknown as JsonRecord) });
+        if (pending.delta) {
+            // SAFETY: ItemDeltaParams contains the thread/turn scope expected by codexEventScope.
+            this.emit("agent_event", { agent: "codex", type: "item.updated", item: { id: pending.params.itemId, type: pending.itemType, delta: pending.delta }, ...codexEventScope(pending.params as unknown as JsonRecord) });
+        }
     }
 
     /** 按 Codex summaryIndex 保存 reasoning 分段，顺序与线程历史一致。 */
@@ -693,13 +761,19 @@ export class CodexAppClient {
     /** 完成指定 JSON-RPC 请求。 */
     private resolve(id: number, result: unknown) {
         const pending = this.pending.get(id);
-        if (pending) (this.pending.delete(id), pending.resolve(result));
+        if (pending) {
+            this.pending.delete(id);
+            pending.resolve(result);
+        }
     }
 
     /** 拒绝指定 JSON-RPC 请求。 */
     private reject(id: number, message: string) {
         const pending = this.pending.get(id);
-        if (pending) (this.pending.delete(id), pending.reject(new Error(message)));
+        if (pending) {
+            this.pending.delete(id);
+            pending.reject(new Error(message));
+        }
     }
 
     /** 拒绝进程退出时仍未完成的请求与 turn。 */
@@ -904,9 +978,4 @@ function parseMaybeJson(value: unknown) {
     } catch {
         return value;
     }
-}
-
-/** 定位当前依赖中 Codex CLI 的执行文件。 */
-function codexBin() {
-    return path.join(path.dirname(require.resolve("@openai/codex/package.json")), "bin", "codex.js");
 }

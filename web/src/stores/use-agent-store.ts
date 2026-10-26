@@ -67,6 +67,24 @@ export type AgentConversationState = {
     error?: string;
 };
 export type AgentPanelTab = "chat" | "history" | "skills" | "log";
+export type AgentAuditEvent = {
+    schemaVersion?: number;
+    eventId: string;
+    sequence: number;
+    timestamp: string;
+    eventType: string;
+    threadId?: string;
+    turnId?: string;
+    itemId?: string;
+    clientId?: string;
+    requestId?: string;
+    messageId?: string;
+    status?: string;
+    payload?: Record<string, unknown>;
+    runId: string;
+    hash: string;
+};
+export type AgentAuditStatus = { failed: boolean; error?: string; directory?: string; runId?: string };
 
 let agentSource: EventSource | null = null;
 let connectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -91,6 +109,8 @@ type AgentStore = {
     messages: AgentChatItem[];
     tokenUsage: AgentTokenUsage | null;
     eventLogs: AgentEventLog[];
+    auditEvents: AgentAuditEvent[];
+    auditStatus: AgentAuditStatus | null;
     threads: AgentThreadSummary[];
     activeThreadId: string;
     activeTurnId: string;
@@ -118,6 +138,7 @@ type AgentStore = {
     disconnectAgent: (patch?: Partial<Omit<AgentStore, "setAgentState" | "connectAgent" | "disconnectAgent" | "addMessage" | "addEventLog" | "clearEventLogs" | "openPanel" | "closePanel" | "togglePanel" | "setCanvasContext">>) => void;
     addMessage: (item: AgentChatItem) => void;
     addEventLog: (item: AgentEventLog) => void;
+    appendAuditEvents: (items: AgentAuditEvent[]) => void;
     clearEventLogs: () => void;
 };
 
@@ -151,6 +172,8 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     messages: [],
     tokenUsage: null,
     eventLogs: [],
+    auditEvents: [],
+    auditStatus: null,
     threads: [],
     activeThreadId: "",
     activeTurnId: "",
@@ -215,5 +238,11 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     },
     addMessage: (item) => set((state) => ({ messages: [...state.messages, item] })),
     addEventLog: (item) => set((state) => ({ eventLogs: [...state.eventLogs.slice(-160), item] })),
+    appendAuditEvents: (items) =>
+        set((state) => {
+            const known = new Set(state.auditEvents.map((event) => event.eventId));
+            const added = items.filter((event) => !known.has(event.eventId));
+            return added.length ? { auditEvents: [...state.auditEvents, ...added].sort((left, right) => left.sequence - right.sequence) } : {};
+        }),
     clearEventLogs: () => set({ eventLogs: [] }),
 }));

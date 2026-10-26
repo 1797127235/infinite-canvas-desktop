@@ -127,7 +127,7 @@ let agentProcess = null;
 
 function startAgent() {
   const entry = path.join(process.resourcesPath, "agent", "dist", "index.js");
-  agentProcess = spawn(process.execPath, [entry], {
+  agentProcess = spawn(process.execPath, [entry, "desktop"], {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1", // 用 Electron 自带的 Node，学员无需安装 Node
@@ -136,8 +136,8 @@ function startAgent() {
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true, // 不弹出黑框
   });
-  agentProcess.stdout.on("data", (chunk) => console.log("[agent]", String(chunk).trim()));
-  agentProcess.stderr.on("data", (chunk) => console.error("[agent]", String(chunk).trim()));
+  agentProcess.stdout.on("data", (chunk) => log(`[agent] ${String(chunk).trim()}`));
+  agentProcess.stderr.on("data", (chunk) => log(`[agent] ${String(chunk).trim()}`));
   agentProcess.on("exit", (code) => console.log("[agent] exited", code));
 }
 
@@ -165,7 +165,7 @@ async function waitForAgent(timeoutMs = 30000) {
 }
 ```
 
-Agent 首次启动会写入 `%USERPROFILE%\.infinite-canvas\canvas-agent.json`，比后续启动慢，30 秒超时足够。
+桌面壳以 `desktop` 模式启动 Agent；Agent 首次启动会写入 `%USERPROFILE%\.infinite-canvas\canvas-agent.json`，比后续启动慢，30 秒超时足够。Agent 不提供无参数独立 CLI。
 
 ## 7. 创建窗口
 

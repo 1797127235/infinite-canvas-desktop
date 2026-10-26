@@ -1,4 +1,4 @@
-/** Agent 向网页广播事件的函数类型。 */
+/** Agent 播事件的函数类型。 */
 export type AgentEmit = (type: string, payload: unknown) => void;
 
 /** 用户随当前 Agent 消息上传的附件。 */

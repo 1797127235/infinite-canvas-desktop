@@ -1,29 +1,18 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import {inspect} from "node:util";
 
 import winston, {format, transports, type Logger as WinstonLogger} from "winston";
 
-import {formatDateForFilename} from "./date.js";
-
-/** 管理 Canvas Agent 的终端与文件 Debug 日志。 */
+/** 输出到父进程，由桌面壳统一写入 desktop.log。 */
 export class Logger {
     readonly enabled = process.argv.includes("--debug");
-    readonly filePath = this.enabled ? path.join(os.homedir(), ".infinite-canvas", "logs", `canvas-agent-${formatDateForFilename()}.log`) : "";
     private readonly logger: WinstonLogger;
 
-    /** 普通模式输出 Info 以上日志，Debug 模式额外输出 Debug 并写入文件。 */
+    /** 仅输出级别和内容；时间由桌面壳添加，stderr 避免污染 MCP stdout。 */
     constructor() {
-        const line = format.printf(({level, message, timestamp, details}) => `${timestamp} ${level.toUpperCase()} ${message}${formatDetails(details)}`);
-        const output = format.combine(format.timestamp({format: "YYYY-MM-DD HH:mm:ss"}), line);
-        if (this.enabled) fs.mkdirSync(path.dirname(this.filePath), {recursive: true});
+        const line = format.printf(({level, message, details}) => `${level.toUpperCase()} ${message}${formatDetails(details)}`);
         this.logger = winston.createLogger({
             level: this.enabled ? "debug" : "info",
-            transports: [
-                new transports.Console({format: output}),
-                ...(this.enabled ? [new transports.File({filename: this.filePath, format: output})] : []),
-            ],
+            transports: [new transports.Console({format: line, stderrLevels: ["error", "warn", "info", "debug"]})],
         });
     }
 

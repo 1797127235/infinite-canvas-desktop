@@ -19,7 +19,7 @@ type TestClient = {
 
 const emptyEventHistory = { record: () => Promise.resolve(), recordTurn: () => Promise.resolve() };
 
-test("审批只在 app-server 确认 resolved 后清除", () => {
+test("审批只在 app-server 确认 resolved 后清除", async () => {
     const writes: Array<Record<string, unknown>> = [];
     const events: Array<{ type: string; payload: unknown }> = [];
     const child = { stdin: { write: (line: string) => (writes.push(JSON.parse(line)), true) } };
@@ -29,16 +29,16 @@ test("审批只在 app-server 确认 resolved 后清除", () => {
     testClient.answerServerRequest({ id: 17, method: "item/commandExecution/requestApproval", params: { threadId: "thread-1", turnId: "turn-1" } });
     assert.equal(events.filter((item) => item.type === "codex_approval").length, 1);
 
-    assert.equal(client.resolveApproval("17", "accept"), true);
+    assert.equal(await client.resolveApproval("17", "accept"), true);
     assert.equal(writes.length, 1);
     assert.equal(events.some((item) => item.type === "codex_approval_resolved"), false);
-    assert.equal(client.resolveApproval("17", "accept"), true);
+    assert.equal(await client.resolveApproval("17", "accept"), true);
     assert.equal(writes.length, 1);
 
     testClient.handleNotification("serverRequest/resolved", { requestId: "17" });
     const resolved = events.find((item) => item.type === "codex_approval_resolved");
     assert.deepEqual(resolved?.payload, { threadId: "thread-1", turnId: "turn-1", requestId: "17", decision: "accept" });
-    assert.equal(client.resolveApproval("17", "accept"), false);
+    assert.equal(await client.resolveApproval("17", "accept"), false);
 });
 
 test("中断请求只作用于当前运行线程", async () => {

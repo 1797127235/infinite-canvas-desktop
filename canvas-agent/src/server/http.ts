@@ -6,6 +6,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { runClaudeTurn } from "../agent/claude.js";
 import { archiveCodexThread, CodexSkillLookupError, configureCodexSkill, generateCodexSkillDraft, interruptCodexTurn, isRecoverableThreadError, listCodexModels, listCodexSkills, listCodexThreads, readCodexThread, resolveCodexApproval, resolveCodexSkill, resumeCodexThread, runCodexTurn, startCodexThread, summarizeCodexThread } from "../agent/codex.js";
 import type { CodexReasoningEffort, CodexSkillSelector } from "../agent/codex-protocol.js";
+import { auditLog } from "../agent/audit-log.js";
 import { messageMetadataStore } from "../agent/message-metadata.js";
 import type { AgentAttachment, AgentPermissionMode } from "../agent/types.js";
 import { AGENT_PROTOCOL_VERSION, CanvasSession } from "../canvas/session.js";
@@ -32,7 +33,9 @@ export function startHttpServer() {
 
     const initialWorkspace = ensureSiteWorkspace(config);
     const allowedOrigins = readAllowedOrigins();
-    const session = new CanvasSession(initialWorkspace.activeThreadId || "");
+    const session = new CanvasSession(initialWorkspace.activeThreadId || "", auditLog, (error) => {
+        session.emitAll("audit_status", { failed: true, error: error.message, directory: auditLog.status().directory });
+    });
     const skillStore = new SkillStore(initialWorkspace.workspacePath);
     /** 将 Agent 事件广播到所属线程或全部网页。 */
     const emit = (type: string, payload: unknown) => {
@@ -59,6 +62,12 @@ export function startHttpServer() {
         if (threadId) session.emitThread(type, threadId, data);
         else session.emitAll(type, data);
     };
+    const broadcastAudit = (event: Awaited<ReturnType<typeof auditLog.record>>) => {
+        if (event.threadId) session.emitThread("audit_event", event.threadId, { event });
+        else session.emitAll("audit_event", { event });
+    };
+    auditLog.subscribe(broadcastAudit);
+    void auditLog.record({ eventType: "agent.started", status: "started", payload: { protocolVersion: AGENT_PROTOCOL_VERSION } }).catch((error) => logger.error("Audit log unavailable", { error }));
     /** 保存并广播当前站点工作空间的活跃线程。 */
     const setActiveThread = (activeThreadId: string, payload: Record<string, unknown> = {}, preserveConversation = false) => {
         const workspace = updateSiteWorkspace(config, { activeThreadId: activeThreadId || undefined });
@@ -143,10 +152,10 @@ export function startHttpServer() {
         session.activateClient(String(req.query.clientId || ""));
         res.json({ ok: true });
     });
-    app.post("/canvas/result", (req, res) => {
-        const ok = session.resolveResult(String(req.query.clientId || ""), req.body);
+    app.post("/canvas/result", route(async (req, res) => {
+        const ok = await session.resolveResult(String(req.query.clientId || ""), req.body);
         res.status(ok ? 200 : 409).json({ ok });
-    });
+    }));
     app.get("/agent/attachments/:attachmentId", route(async (req, res) => {
         const attachment = session.getTurnAttachment(String(req.query.clientId || ""), routeParam(req.params.attachmentId));
         const data = attachment.dataUrl.split(",", 2)[1];
@@ -180,6 +189,15 @@ export function startHttpServer() {
         const workspace = ensureSiteWorkspace(config);
         res.json({ ok: true, workspace, conversation: session.conversationStateSnapshot });
     });
+    app.get("/agent/audit", route(async (req, res) => {
+        const page = await auditLog.query({
+            threadId: String(req.query.threadId || "") || undefined,
+            turnId: String(req.query.turnId || "") || undefined,
+            afterSequence: Number(req.query.afterSequence || 0),
+            limit: Number(req.query.limit || 500),
+        });
+        res.json({ ok: true, ...page, status: auditLog.status() });
+    }));
     app.get("/agent/codex/models", route(async (_req, res) => res.json({ ok: true, ...(await listCodexModels(emit)) })));
     app.get("/agent/codex/skills", route(async (req, res) => {
         const workspace = ensureSiteWorkspace(config);
@@ -320,6 +338,28 @@ export function startHttpServer() {
         const messageId = String(req.body?.messageId || Date.now());
         const messageText = String(req.body?.messageText || prompt || `发送了 ${attachments.length} 张图片`);
         const messageMetadata = await messageMetadataStore.recordPending(messageId, req.body?.messageMetadata);
+        try {
+            await auditLog.record({
+                eventType: "user_message.accepted",
+                threadId: activeThreadId,
+                clientId,
+                messageId,
+                status: "accepted",
+                payload: {
+                    text: messageText,
+                    prompt,
+                    model: model || "default",
+                    reasoningEffort: effort || "default",
+                    permissionMode: permissionMode(req.body?.permissionMode),
+                    attachmentCount: attachments.length,
+                    metadata: messageMetadata,
+                },
+            });
+        } catch (error) {
+            logger.error("Audit log write failed before Codex turn", { error, threadId: activeThreadId, messageId });
+            await messageMetadataStore.remove(messageId, activeThreadId).catch(() => undefined);
+            return res.status(503).json({ ok: false, code: "AUDIT_UNAVAILABLE", error: "审计日志暂时不可写，本轮任务未启动" });
+        }
         let threadId = activeThreadId;
         logger.info("Codex turn accepted", { threadId: req.body?.threadId, model: model || "default", reasoningEffort: effort || "default", promptLength: prompt.length, attachmentCount: attachments.length });
         session.bindClient(clientId);
@@ -375,6 +415,7 @@ export function startHttpServer() {
                 },
                 onTurn: (actualTurnId) => {
                     turnId = actualTurnId;
+                    void auditLog.record({ eventType: "turn.bound", threadId, turnId, clientId, messageId, status: "started" }).catch((error) => logger.error("Audit log write failed for turn start", { error, threadId, turnId }));
                     void messageMetadataStore.bindTurn(messageId, threadId, turnId).catch((error) => logger.warn("Failed to bind message metadata to turn", { clientMessageId: messageId, threadId, turnId, error }));
                     if (chatTurnId !== turnId) {
                         chatTurnId = turnId;
@@ -388,6 +429,7 @@ export function startHttpServer() {
                     session.setCodexState({ busy: true, threadId, turnId });
                 },
                 onFinish: () => {
+                    void auditLog.record({ eventType: "turn.finished", threadId, turnId: turnId || undefined, clientId, messageId, status: turnId ? "finished" : "failed" }).catch((error) => logger.error("Audit log write failed for turn finish", { error, threadId, turnId }));
                     logger.info("Codex turn finished", { threadId, turnId });
                     if (!turnId) void messageMetadataStore.remove(messageId, threadId).catch((error) => logger.warn("Failed to remove unbound message metadata", { clientMessageId: messageId, error }));
                     // 附件保留到下一回合 setTurnAttachments 覆盖或页面断开时清理：回合失败后用户重试/续跑时，模型仍引用上一回合的附件。
@@ -438,16 +480,9 @@ export function startHttpServer() {
         res.status(500).json({ ok: false, error: error.message });
     });
 
-    app.listen(port, "127.0.0.1", () => {
-        console.log("Infinite Canvas Agent");
+    return app.listen(port, "127.0.0.1", () => {
         checkVersions();
-        console.log(`Local URL: ${config.url}`);
-        console.log("Codex MCP is not installed by this command.");
-        const selfEntry = process.argv[1] ? `"${process.execPath}" "${process.argv[1]}" mcp` : "";
-        if (selfEntry) console.log(`Optional MCP add: codex mcp add infinite-canvas -- ${selfEntry}`);
-        console.log("Remove manually added MCP: codex mcp remove infinite-canvas");
-        if (logger.enabled) console.log(`Debug log: ${logger.filePath}`);
-        logger.info("Canvas Agent started", { url: config.url, workspace: ensureSiteWorkspace(config).workspacePath, allowedOrigins: allowedOrigins ? allowedOrigins.join(",") : "*", debugLog: logger.filePath });
+        logger.info("Canvas Agent started", { url: config.url, workspace: ensureSiteWorkspace(config).workspacePath, allowedOrigins: allowedOrigins.join(",") });
         const activeThreadId = initialWorkspace.activeThreadId || "";
         if (activeThreadId && session.beginCodexMutation()) {
             void prepareExistingThread(activeThreadId).catch(async (error) => {
@@ -524,27 +559,25 @@ function requestUrl(req: Request, config: CanvasAgentConfig) {
     return new URL(req.originalUrl || req.url || "/", config.url);
 }
 
-/** 桌面版由主进程注入允许的网页来源；未设置时（网页版）保持放行任意来源。 */
+/** 桌面主进程注入允许的网页来源；缺少配置时不放行跨域来源。 */
 function readAllowedOrigins() {
-    const origins = (process.env.CANVAS_AGENT_ALLOWED_ORIGINS || "").split(",").map((item) => item.trim()).filter(Boolean);
-    return origins.length ? origins : null;
+    return (process.env.CANVAS_AGENT_ALLOWED_ORIGINS || "").split(",").map((item) => item.trim()).filter(Boolean);
 }
 
-/** 决定是否给当前请求下发跨域头：未配置白名单时放行，配置后只认白名单来源。 */
-export function corsOrigin(origin: string, allowed: string[] | null) {
-    if (!allowed) return "*";
+/** 只为桌面白名单中的来源下发跨域头。 */
+export function corsOrigin(origin: string, allowed: string[]) {
     return origin && allowed.includes(origin) ? origin : "";
 }
 
 /** 设置跨域响应头。仅监听 127.0.0.1；本机非浏览器请求不带 Origin，不需要跨域头。 */
-function setCors(req: Request, res: Response, allowed: string[] | null) {
+function setCors(req: Request, res: Response, allowed: string[]) {
     const allowOrigin = corsOrigin(String(req.headers.origin || ""), allowed);
     if (!allowOrigin) return;
     res.setHeader("Access-Control-Allow-Origin", allowOrigin);
     res.setHeader("Access-Control-Allow-Headers", "content-type");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
     res.setHeader("Access-Control-Allow-Private-Network", "true");
-    if (allowOrigin !== "*") res.setHeader("Vary", "Origin");
+    res.setHeader("Vary", "Origin");
 }
 
 /** 向 Agent 提示词追加本轮图片附件引用说明。 */

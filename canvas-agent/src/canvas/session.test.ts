@@ -58,7 +58,7 @@ test("画布写操作只发送给当前激活网页", async (t) => {
     const call = second.event("tool_call");
     assert.equal(first.event("tool_call"), undefined);
     assert.equal(field(call, "name"), "canvas_apply_ops");
-    session.resolveResult("second", { requestId: String(field(call, "requestId")), result: { ok: true } });
+    await session.resolveResult("second", { requestId: String(field(call, "requestId")), result: { ok: true } });
     assert.deepEqual(await result, { ok: true });
 });
 
@@ -84,7 +84,7 @@ test("当前 turn 的图片附件可在发起标签页画布创建图片节点",
     assert.equal("dataUrl" in nodes[0], false);
     assert.equal(session.getTurnAttachment("first", "attachment-1").dataUrl, dataUrl);
 
-    session.resolveResult("first", { requestId: String(field(call, "requestId")), result: { ok: true } });
+    await session.resolveResult("first", { requestId: String(field(call, "requestId")), result: { ok: true } });
     const created = (await result) as { nodes: Array<{ id: string; attachmentId: string; title: string }> };
     assert.equal(created.nodes[0].id, nodes[0].id);
     assert.equal(created.nodes[0].attachmentId, "attachment-1");
@@ -123,8 +123,8 @@ test("tool result is accepted only from the request client", async (t) => {
     const call = first.event("tool_call");
     const requestId = String(field(call, "requestId"));
 
-    assert.equal(session.resolveResult("second", { requestId, result: { client: "second" } }), false);
-    assert.equal(session.resolveResult("first", { requestId, result: { client: "first" } }), true);
+    assert.equal(await session.resolveResult("second", { requestId, result: { client: "second" } }), false);
+    assert.equal(await session.resolveResult("first", { requestId, result: { client: "first" } }), true);
     assert.deepEqual(await result, { client: "first" });
 });
 
@@ -142,7 +142,7 @@ test("生成状态查询由当前激活网页返回", async (t) => {
     const call = second.event("tool_call");
     assert.equal(first.event("tool_call"), undefined);
     assert.equal(field(call, "name"), "generation_get_status");
-    session.resolveResult("second", { requestId: String(field(call, "requestId")), result: { total: 1, tasks: [{ id: "image-1", status: "running" }] } });
+    await session.resolveResult("second", { requestId: String(field(call, "requestId")), result: { total: 1, tasks: [{ id: "image-1", status: "running" }] } });
     assert.deepEqual(await result, { total: 1, tasks: [{ id: "image-1", status: "running" }] });
 });
 
@@ -194,7 +194,7 @@ test("closing a client rejects its pending tool requests", async () => {
         result.then(() => "resolved", (error) => error instanceof Error ? error.message : String(error)),
         new Promise<string>((resolve) => setTimeout(() => resolve("pending"), 20)),
     ]);
-    if (outcome === "pending") session.resolveResult("first", { requestId, result: null });
+    if (outcome === "pending") await session.resolveResult("first", { requestId, result: null });
     assert.match(outcome, /断开/);
 });
 
@@ -349,7 +349,7 @@ test("a bound client remains the tool target while focus changes", async (t) => 
     const result = session.callTool("canvas_create_text_node", { text: "bound" });
     const call = first.event("tool_call");
     assert.equal(second.event("tool_call"), undefined);
-    session.resolveResult("first", { requestId: String(field(call, "requestId")), result: { ok: true } });
+    await session.resolveResult("first", { requestId: String(field(call, "requestId")), result: { ok: true } });
     assert.deepEqual(await result, { ok: true });
 
     session.releaseClient("first");
@@ -381,7 +381,7 @@ test("a disconnected bound client never falls back and can resume with the same 
     const result = session.callTool("canvas_create_text_node", { text: "reconnected" });
     const call = reconnected.event("tool_call");
     assert.equal(second.event("tool_call"), undefined);
-    session.resolveResult("first", { requestId: String(field(call, "requestId")), result: { ok: true } });
+    await session.resolveResult("first", { requestId: String(field(call, "requestId")), result: { ok: true } });
     assert.deepEqual(await result, { ok: true });
 });
 

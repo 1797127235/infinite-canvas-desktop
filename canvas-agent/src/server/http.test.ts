@@ -5,9 +5,9 @@ import { corsOrigin } from "./http.js";
 
 const desktopOrigins = ["http://127.0.0.1:17370", "http://localhost:17370"];
 
-test("未配置来源白名单时保持放行任意来源", () => {
-    assert.equal(corsOrigin("", null), "*");
-    assert.equal(corsOrigin("https://canvas.best", null), "*");
+test("未配置桌面白名单时不放行跨域来源", () => {
+    assert.equal(corsOrigin("", []), "");
+    assert.equal(corsOrigin("https://canvas.best", []), "");
 });
 
 test("配置白名单后只回显白名单来源", () => {

@@ -2,7 +2,8 @@ const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
 const { execFileSync } = require("node:child_process");
-const { app, BrowserWindow, Menu, ipcMain, safeStorage, shell } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, dialog, safeStorage, shell } = require("electron");
+const { autoUpdater } = require("electron-updater");
 
 const { ensureCodex, log, runCodex, startAgent, startProxy, stopChildren } = require("./services");
 const { fetchAvailableModels, hasExistingCodexConfig, normalizeOpenAIBaseUrl } = require("./onboarding");
@@ -195,7 +196,7 @@ function registerIpc() {
             resolve(setup);
             return;
         }
-        stopChildren();
+        await stopChildren();
         booting = null;
         return void (await openApp());
     });
@@ -238,6 +239,46 @@ function registerIpc() {
     });
 }
 
+/**
+ * 自动更新走 GitHub Releases（electron-builder.yml 的 publish）。仅打包后启用，
+ * 开发模式跳过（AppImage/NSIS 环境不存在，检查会直接抛错）。
+ * 启动时静默检查一次，失败（离线、GitHub 不可达）不打扰用户；「帮助 → 检查更新」手动检查才弹窗。
+ */
+let manualUpdateCheck = false;
+
+function setupAutoUpdater() {
+    if (!app.isPackaged) return;
+    autoUpdater.autoDownload = true;
+    autoUpdater.on("update-available", async (info) => {
+        if (!manualUpdateCheck) return;
+        manualUpdateCheck = false;
+        await dialog.showMessageBox({ type: "info", title: "检查更新", message: `发现新版本 v${info.version}，正在后台下载，完成后会提示安装。` });
+    });
+    autoUpdater.on("update-not-available", async () => {
+        if (!manualUpdateCheck) return;
+        manualUpdateCheck = false;
+        await dialog.showMessageBox({ type: "info", title: "检查更新", message: `当前已是最新版本（v${app.getVersion()}）。` });
+    });
+    autoUpdater.on("error", async (error) => {
+        if (!manualUpdateCheck) return;
+        manualUpdateCheck = false;
+        await dialog.showMessageBox({ type: "warning", title: "检查更新", message: "检查更新失败，请检查网络后重试。", detail: String(error?.message || error) });
+    });
+    autoUpdater.on("update-downloaded", async () => {
+        const { response } = await dialog.showMessageBox({
+            type: "info",
+            title: "更新就绪",
+            message: "新版本已下载完成。",
+            detail: "重启应用以完成安装，重启后画布数据不受影响。",
+            buttons: ["立即重启", "稍后"],
+            defaultId: 0,
+            cancelId: 1,
+        });
+        if (response === 0) autoUpdater.quitAndInstall();
+    });
+    autoUpdater.checkForUpdates().catch((error) => log(`update check failed: ${error.message}`));
+}
+
 function buildMenu() {
     Menu.setApplicationMenu(
         Menu.buildFromTemplate([
@@ -259,7 +300,11 @@ function buildMenu() {
             },
             {
                 label: "帮助",
-                submenu: [{ label: "打开项目主页", click: () => shell.openExternal("https://github.com/basketikun/infinite-canvas") }],
+                submenu: [
+                    { label: "检查更新…", click: () => { manualUpdateCheck = true; autoUpdater.checkForUpdates().catch(() => {}); } },
+                    { type: "separator" },
+                    { label: "打开项目主页", click: () => shell.openExternal("https://github.com/basketikun/infinite-canvas") },
+                ],
             },
         ]),
     );
@@ -275,12 +320,19 @@ if (!app.requestSingleInstanceLock()) {
         }
     });
     app.on("web-contents-created", (_event, contents) => lockNavigation(contents));
-    app.on("before-quit", () => stopChildren());
+    let quitting = false;
+    app.on("before-quit", (event) => {
+        if (quitting) return;
+        event.preventDefault();
+        quitting = true;
+        void stopChildren().finally(() => app.quit());
+    });
     app.on("window-all-closed", () => app.quit());
     app.whenReady().then(() => {
         registerIpc();
         buildMenu();
         createSplash();
+        setupAutoUpdater();
         void openApp();
     });
 }

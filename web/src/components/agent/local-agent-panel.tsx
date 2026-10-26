@@ -35,7 +35,7 @@ import {
 } from "@/stores/use-agent-store";
 import { type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { isSiteTool, runSiteTool } from "@/lib/agent/agent-site-tools";
-import { acknowledgeCodexHistory, activateAgentClient, AgentApiError, discoverAgentConfig, fetchAgentJson, interruptCodexTurn, postCodexApproval, postState, postToolResult } from "@/services/api/canvas-agent";
+import { acknowledgeCodexHistory, activateAgentClient, AgentApiError, discoverAgentConfig, fetchAgentJson, interruptCodexTurn, postCodexApproval, postState, postToolResult, type AgentAuditEvent, type AgentAuditStatus } from "@/services/api/canvas-agent";
 import { AgentChatTimeline, AgentTaskProgress, AgentUsageBar } from "./agent-chat";
 import { AgentChatComposer } from "./agent-chat-composer";
 import {
@@ -474,6 +474,16 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                         addEventLog(rt("conversationInitFailed"), error);
                     });
             }
+        });
+        source.addEventListener("audit_event", (event) => {
+            if (!isCurrentConnection()) return;
+            const data = parseEventData<{ event?: AgentAuditEvent }>(event)?.event;
+            if (data?.eventId) useAgentStore.getState().appendAuditEvents([data]);
+        });
+        source.addEventListener("audit_status", (event) => {
+            if (!isCurrentConnection()) return;
+            const data = parseEventData<AgentAuditStatus>(event);
+            if (data) setAgentState({ auditStatus: data });
         });
         source.addEventListener("codex_state", (event) => {
             const data = parseEventData<AgentCodexState>(event);

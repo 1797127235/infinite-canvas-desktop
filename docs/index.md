@@ -7,7 +7,6 @@
 - [Render 部署](/docs/overview/render)
 - [Docker 部署](/docs/overview/docker)
 - [第三方提示词来源](/docs/overview/third-party-prompt-repositories)
-- [Codex app 插件](/docs/overview/codex-app-plugin)
 
 ## 操作手册
 

@@ -5,6 +5,13 @@ copyright: MIT
 directories:
     output: release
 
+# 自动更新源：本仓库的 GitHub Releases。注意 fork 的 homepage 指向 upstream，
+# electron-updater 默认按 package.json 推断仓库会找错，所以必须显式声明。
+publish:
+    provider: github
+    owner: 1797127235
+    repo: infinite-canvas-desktop
+
 files:
     - src/**
     - package.json
@@ -50,7 +57,8 @@ win:
         - target: nsis
           arch:
               - x64
-    artifactName: ${productName}-${version}-win-${arch}.${ext}
+    # 文件名不能带空格：yml 里空格会写成 -，GitHub 资产名会把空格改写成 .，两边对不上更新就 404。
+    artifactName: Infinite-Canvas-${version}-win-${arch}.${ext}
 
 nsis:
     oneClick: false
@@ -67,7 +75,8 @@ linux:
     maintainer: basketikun <basketikun@users.noreply.github.com>
     icon: build/icons
     syncDesktopName: true
-    artifactName: ${productName}-${version}-linux-${arch}.${ext}
+    # 同 win：文件名不能带空格，否则更新下载 URL 与 GitHub 资产名对不上。
+    artifactName: Infinite-Canvas-${version}-linux-${arch}.${ext}
 
 electronDownload:
     mirror: https://npmmirror.com/mirrors/electron/
