@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v0.1.2
+
++ [新增] Agent 日志页可导出问题日志 JSON，打包桌面运行日志、前端事件和当前会话审计记录，供用户交给维护者或 coding agent 定位问题；导出前提示内容范围，不自动上传。
+
 + [调整] Canvas Agent 收敛为桌面内部组件，移除独立 npm CLI 与旧外部插件入口，运行日志统一由 Electron 写入 `desktop.log`，保留桌面助手所需的内部 MCP 通信。
 
 + [新增] 桌面版自动更新：接入 electron-updater，更新源为本仓库 GitHub Releases；启动时静默检查，「帮助 → 检查更新…」可手动检查，发现新版本自动后台下载（Windows 走增量下载），完成后提示重启安装，网页产物、Canvas Agent 与本地代理随安装包一起更新。

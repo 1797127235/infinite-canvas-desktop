@@ -5,7 +5,8 @@ const { execFileSync } = require("node:child_process");
 const { app, BrowserWindow, Menu, ipcMain, dialog, safeStorage, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 
-const { ensureCodex, log, runCodex, startAgent, startProxy, stopChildren } = require("./services");
+const { ensureCodex, log, readDesktopLog, runCodex, startAgent, startProxy, stopChildren } = require("./services");
+const { buildProblemLogBundle } = require("./problem-log");
 const { fetchAvailableModels, hasExistingCodexConfig, normalizeOpenAIBaseUrl } = require("./onboarding");
 const { channelSetupForRenderer, readSetup, saveSetup, setupCodexDecision } = require("./onboarding-store");
 const { AGENT_PREFIX, startWebServer } = require("./server");
@@ -224,6 +225,20 @@ function registerIpc() {
         if (event.sender !== mainWindow?.webContents) throw new Error("只允许画布页面读取配置");
         const setup = readSetup(app.getPath("userData"), safeStorage);
         return channelSetupForRenderer(setup);
+    });
+    ipcMain.handle("problem-log:export", async (event, input) => {
+        if (event.sender !== mainWindow?.webContents) throw new Error("只允许画布页面导出问题日志");
+        if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("问题日志内容无效");
+        const bundle = buildProblemLogBundle({ ...input, application: { ...input.application, version: app.getVersion(), platform: process.platform, arch: process.arch }, desktopLog: readDesktopLog() });
+        const defaultPath = path.join(app.getPath("downloads"), `infinite-canvas-problem-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
+        const result = await dialog.showSaveDialog(mainWindow, {
+            title: "导出问题日志",
+            defaultPath,
+            filters: [{ name: "问题日志 JSON", extensions: ["json"] }],
+        });
+        if (result.canceled || !result.filePath) return { canceled: true };
+        fs.writeFileSync(result.filePath, JSON.stringify(bundle, null, 2), { encoding: "utf8", mode: 0o600 });
+        return { canceled: false, filePath: result.filePath };
     });
     ipcMain.handle("codex:status", () => runCodexCommand(["login", "status"]));
     ipcMain.handle("codex:login-api-key", (_event, apiKey) => {

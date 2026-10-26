@@ -168,6 +168,14 @@ function log(text) {
     } catch {}
 }
 
+function readDesktopLog() {
+    try {
+        return fs.readFileSync(logFile, "utf8");
+    } catch {
+        return null;
+    }
+}
+
 /** 启动内置 Canvas Agent，并把下载好的 Codex 通过环境变量交给它。 */
 async function startAgent(codexBin, onProgress, env = {}) {
     const { agentEntry } = layout();
@@ -216,4 +224,4 @@ function runCodex(args, { input, detached = false, env = {} } = {}) {
     return { child, output: () => output };
 }
 
-module.exports = { codexBinPath, ensureCodex, runCodex, startAgent, startProxy, stopChildren, log };
+module.exports = { codexBinPath, ensureCodex, runCodex, startAgent, startProxy, stopChildren, log, readDesktopLog };

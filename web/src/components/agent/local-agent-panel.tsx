@@ -6,6 +6,7 @@ import { Bot, History, MessageSquare, PanelRightClose, Plus, Sparkles, Terminal 
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
+import { APP_VERSION } from "@/constant/env";
 import { readAgentUrlBootstrap } from "@/lib/agent/agent-url-bootstrap";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { upscaleDataUrl } from "@/lib/canvas/canvas-image-data";
@@ -35,7 +36,20 @@ import {
 } from "@/stores/use-agent-store";
 import { type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { isSiteTool, runSiteTool } from "@/lib/agent/agent-site-tools";
-import { acknowledgeCodexHistory, activateAgentClient, AgentApiError, discoverAgentConfig, fetchAgentJson, interruptCodexTurn, postCodexApproval, postState, postToolResult, type AgentAuditEvent, type AgentAuditStatus } from "@/services/api/canvas-agent";
+import {
+    acknowledgeCodexHistory,
+    activateAgentClient,
+    AgentApiError,
+    discoverAgentConfig,
+    fetchAgentJson,
+    fetchAllAgentAudit,
+    interruptCodexTurn,
+    postCodexApproval,
+    postState,
+    postToolResult,
+    type AgentAuditEvent,
+    type AgentAuditStatus,
+} from "@/services/api/canvas-agent";
 import { AgentChatTimeline, AgentTaskProgress, AgentUsageBar } from "./agent-chat";
 import { AgentChatComposer } from "./agent-chat-composer";
 import {
@@ -170,6 +184,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         waiting,
         tokenUsage,
         eventLogs,
+        auditEvents,
         threads,
         activeThreadId,
         workspacePath,
@@ -197,6 +212,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
             waiting: state.waiting,
             tokenUsage: state.tokenUsage,
             eventLogs: state.eventLogs,
+            auditEvents: state.auditEvents,
             threads: state.threads,
             activeThreadId: state.activeThreadId,
             workspacePath: state.workspacePath,
@@ -1395,6 +1411,31 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
         setAgentState({ messages: currentMessages.map((message, itemIndex) => (itemIndex === index ? { ...message, text: isDelta ? `${message.text}${text}` : mergeStreamText(message.text, text) } : message)) });
     };
 
+    const exportProblemLog = () => {
+        if (!window.canvasDesktop?.exportProblemLog) {
+            message.warning("问题日志导出仅在桌面版可用。");
+            return;
+        }
+        modal.confirm({
+            title: "导出问题日志",
+            content: "日志包含用户输入、工具输出和本地路径。保存后请检查文件，再发送给维护者或 coding agent；不会自动上传。",
+            okText: "继续并保存",
+            cancelText: "取消",
+            onOk: async () => {
+                const audit = connected ? await fetchAllAgentAudit(endpoint, token, { threadId: activeThreadId || undefined }) : { events: auditEvents, status: useAgentStore.getState().auditStatus };
+                const result = await window.canvasDesktop!.exportProblemLog!({
+                    application: { version: APP_VERSION, platform: navigator.platform, arch: "unknown" },
+                    context: { threadId: activeThreadId, turnId: useAgentStore.getState().activeTurnId, activity, connection: connected ? "connected" : "disconnected" },
+                    frontendLogs: eventLogs,
+                    auditEvents: audit.events,
+                    auditStatus: audit.status,
+                    auditComplete: connected,
+                });
+                if (!result.canceled) message.success(`问题日志已保存：${result.filePath}`);
+            },
+        });
+    };
+
     const content = (
         <>
             <AgentPanelTabs
@@ -1464,6 +1505,7 @@ export function LocalAgentPanel({ embedded, headless, autoConnect }: { embedded?
                     onClear={clearEventLogs}
                     onCopied={(text) => message.success(text)}
                     onCopyBlocked={(text) => message.warning(text)}
+                    onExportProblemLog={exportProblemLog}
                 />
             ) : (
                 <>

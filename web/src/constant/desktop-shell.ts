@@ -30,6 +30,7 @@ type DesktopShellConfig = { agentUrl?: string; proxyUrl?: string };
 
 type DesktopShellApi = {
     readOnboarding?: () => Promise<SavedOnboardingConfig | null>;
+    exportProblemLog?: (bundle: unknown) => Promise<{ canceled: boolean; filePath?: string }>;
 };
 
 declare global {

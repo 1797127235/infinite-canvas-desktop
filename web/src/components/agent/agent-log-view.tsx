@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Segmented, Tooltip } from "antd";
 import copyToClipboard from "copy-to-clipboard";
-import { CheckCircle2, ChevronDown, CircleAlert, CircleDot, Copy, Trash2, TriangleAlert } from "lucide-react";
+import { CheckCircle2, ChevronDown, CircleAlert, CircleDot, Copy, Download, Trash2, TriangleAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
@@ -24,6 +24,7 @@ export function AgentLogView({
     onClear,
     onCopied,
     onCopyBlocked,
+    onExportProblemLog,
 }: {
     logs: AgentEventLog[];
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
@@ -31,6 +32,7 @@ export function AgentLogView({
     onClear: () => void;
     onCopied: (text: string) => void;
     onCopyBlocked: (text: string) => void;
+    onExportProblemLog?: () => void;
 }) {
     const { t } = useTranslation();
     const [mode, setMode] = useState<"audit" | "text" | "json">("audit");
@@ -125,16 +127,23 @@ export function AgentLogView({
             <div className="flex h-full min-h-0 flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                     <div className="text-base font-semibold leading-6">{t("agent.logs.title")}</div>
-                    <Segmented
-                        size="small"
-                        value={mode}
-                        onChange={(value) => setMode(value as "audit" | "text" | "json")}
-                        options={[
-                            { label: "审计记录", value: "audit" },
-                            { label: t("agent.logs.diagnostics"), value: "text" },
-                            { label: t("agent.logs.rawJson"), value: "json" },
-                        ]}
-                    />
+                    <div className="flex min-w-0 items-center gap-2">
+                        <Segmented
+                            size="small"
+                            value={mode}
+                            onChange={(value) => setMode(value as "audit" | "text" | "json")}
+                            options={[
+                                { label: "审计记录", value: "audit" },
+                                { label: t("agent.logs.diagnostics"), value: "text" },
+                                { label: t("agent.logs.rawJson"), value: "json" },
+                            ]}
+                        />
+                        {onExportProblemLog ? (
+                            <Button type="text" size="small" icon={<Download className="size-3.5" />} onClick={onExportProblemLog}>
+                                导出问题日志
+                            </Button>
+                        ) : null}
+                    </div>
                 </div>
 
                 <div className="border-y py-2.5" style={{ borderColor: theme.node.stroke }}>

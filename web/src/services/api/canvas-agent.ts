@@ -61,6 +61,19 @@ export async function fetchAgentAudit(endpoint: string, token: string, query: { 
     return data;
 }
 
+export async function fetchAllAgentAudit(endpoint: string, token: string, query: { threadId?: string }, signal?: AbortSignal) {
+    const events: AgentAuditEvent[] = [];
+    let afterSequence = 0;
+    let status: AgentAuditResponse["status"] | undefined;
+    for (;;) {
+        const page = await fetchAgentAudit(endpoint, token, { ...query, afterSequence, limit: 500 }, signal);
+        events.push(...page.events);
+        status = page.status;
+        if (!page.hasMore) return { events, status };
+        afterSequence = page.nextSequence;
+    }
+}
+
 export type AgentSkillScope = "user" | "repo" | "system" | "admin";
 export type AgentSkillInterface = { displayName?: string | null; shortDescription?: string | null; defaultPrompt?: string | null };
 export type AgentSkillSummary = {

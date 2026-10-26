@@ -19,4 +19,5 @@ contextBridge.exposeInMainWorld("canvasDesktop", {
     fetchOnboardingModels: (input) => ipcRenderer.invoke("onboarding:fetch-models", input),
     saveOnboarding: (input) => ipcRenderer.invoke("onboarding:save", input),
     readOnboarding: () => ipcRenderer.invoke("onboarding:read"),
+    exportProblemLog: (bundle) => ipcRenderer.invoke("problem-log:export", bundle),
 });
